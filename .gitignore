@@ -1,0 +1,33 @@
+# Environment variables
+.env
+
+# Build artifacts
+server/build/
+server/server
+*.o
+*.a
+*.so
+*.exe
+
+# Dependencies
+server/cJSON/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.py[cod]
+*$py.class
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
