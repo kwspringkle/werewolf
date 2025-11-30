@@ -1,0 +1,119 @@
+# Main file để chạy ứng dụng Werewolf
+import sys
+from pathlib import Path
+from PyQt5 import QtWidgets, QtCore
+
+src_path = Path(__file__).parent / "src"
+sys.path.insert(0, str(src_path))
+
+from network_client import WerewolfNetworkClient
+from components.toast_notification import ToastManager
+from components.window_manager import WindowManager
+from windows.welcome_window import WelcomeWindow
+from windows.register_window import RegisterWindow
+from windows.login_window import LoginWindow
+from windows.lobby_window import LobbyWindow
+from windows.room_window import RoomWindow
+
+
+class WerewolfApplication:    
+    def __init__(self):
+        self.app = QtWidgets.QApplication(sys.argv)
+        self.app.setApplicationName("Werewolf Game")
+        
+        # Load stylesheet
+        self.load_stylesheet()
+        
+        # Khởi tạo client 
+        self.network_client = WerewolfNetworkClient()
+        
+        # Khởi tạo window manager
+        self.window_manager = WindowManager(self.app)
+        
+        # Khởi tạo các cửa sổ
+        self.init_windows()
+        
+    def load_stylesheet(self):
+        """Load QSS stylesheet"""
+        qss_path = Path(__file__).parent / "assets" / "werewolf_theme.qss"
+        
+        if qss_path.exists():
+            with open(qss_path, 'r', encoding='utf-8') as f:
+                stylesheet = f.read()
+                self.app.setStyleSheet(stylesheet)
+        else:
+            print(f"Warning: Stylesheet not found at {qss_path}")
+            
+    def init_windows(self):
+        """Khởi tạo tất cả các cửa sổ"""
+        # Create a main container widget for toast notifications
+        self.main_container = QtWidgets.QWidget()
+        self.main_container.setWindowTitle("Werewolf Game")
+        self.main_container.resize(800, 600)
+        
+        # Quản lý toast
+        self.toast_manager = ToastManager(self.main_container)
+        
+        # Khởi tạo các cửa sổ
+        self.welcome_window = WelcomeWindow(
+            self.network_client,
+            self.toast_manager,
+            self.window_manager
+        )
+        
+        self.register_window = RegisterWindow(
+            self.toast_manager,
+            self.window_manager
+        )
+        
+        self.login_window = LoginWindow(
+            self.toast_manager,
+            self.window_manager
+        )
+        
+        self.lobby_window = LobbyWindow(
+            self.toast_manager,
+            self.window_manager
+        )
+        
+        self.room_window = RoomWindow(
+            self.toast_manager,
+            self.window_manager
+        )
+        
+        # Đăng ký các cửa sổ
+        self.window_manager.register_window("welcome", self.welcome_window)
+        self.window_manager.register_window("register", self.register_window)
+        self.window_manager.register_window("login", self.login_window)
+        self.window_manager.register_window("lobby", self.lobby_window)
+        self.window_manager.register_window("room", self.room_window)
+        
+        # Kết nối cleanup
+        self.app.aboutToQuit.connect(self.cleanup)
+        
+    def run(self):
+        """Chạy ứng dụng"""
+        # Hiện cửa sổ welcome
+        self.window_manager.navigate_to("welcome")
+        
+        # Bắt đầu vòng lặp sự kiện
+        return self.app.exec_()
+        
+    def cleanup(self):
+        """Dọn dẹp tài nguyên"""
+        try:
+            if self.network_client:
+                self.network_client.disconnect()
+                self.network_client.destroy()
+        except:
+            pass
+
+
+def main():
+    """Main entry point"""
+    app = WerewolfApplication()
+    sys.exit(app.run())
+
+
+if __name__ == "__main__":
+    main()
