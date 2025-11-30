@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>RoomWindow</class>
+ <widget class="QWidget" name="RoomWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>700</width>
+    <height>600</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Werewolf - Room</string>
+  </property>
+  <property name="objectName">
+   <string>room_window</string>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="QLabel" name="roomTitleLabel">
+     <property name="text">
+      <string>Room Name</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignCenter</set>
+     </property>
+     <property name="objectName">
+      <string>room_title_label</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="roomInfoLabel">
+     <property name="text">
+      <string>Room ID: 0 | Status: Waiting</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignCenter</set>
+     </property>
+     <property name="objectName">
+      <string>room_info_label</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="playersGroup">
+     <property name="title">
+      <string>Players in Room</string>
+     </property>
+     <property name="objectName">
+      <string>players_group</string>
+     </property>
+     <layout class="QVBoxLayout" name="verticalLayout_2">
+      <item>
+       <widget class="QListWidget" name="playerList">
+        <property name="objectName">
+         <string>player_list</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="horizontalLayout">
+     <item>
+      <widget class="QPushButton" name="startGameButton">
+       <property name="text">
+        <string>Start Game</string>
+       </property>
+       <property name="enabled">
+        <bool>false</bool>
+       </property>
+       <property name="objectName">
+        <string>start_game_button</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="leaveRoomButton">
+       <property name="text">
+        <string>Leave Room</string>
+       </property>
+       <property name="objectName">
+        <string>leave_room_button</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

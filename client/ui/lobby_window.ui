@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>LobbyWindow</class>
+ <widget class="QWidget" name="LobbyWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>900</width>
+    <height>700</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Werewolf - Lobby</string>
+  </property>
+  <property name="objectName">
+   <string>lobby_window</string>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="QLabel" name="welcomeLabel">
+     <property name="text">
+      <string>Welcome, Player!</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignCenter</set>
+     </property>
+     <property name="objectName">
+      <string>welcome_label</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="createRoomGroup">
+     <property name="title">
+      <string>Create New Room</string>
+     </property>
+     <property name="objectName">
+      <string>create_room_group</string>
+     </property>
+     <layout class="QHBoxLayout" name="horizontalLayout">
+      <item>
+       <widget class="QLabel" name="roomNameLabel">
+        <property name="text">
+         <string>Room Name:</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLineEdit" name="roomNameInput">
+        <property name="placeholderText">
+         <string>Enter room name...</string>
+        </property>
+        <property name="objectName">
+         <string>room_name_input</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="createRoomButton">
+        <property name="text">
+         <string>Create Room</string>
+        </property>
+        <property name="objectName">
+         <string>create_room_button</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="roomListGroup">
+     <property name="title">
+      <string>Available Rooms</string>
+     </property>
+     <property name="objectName">
+      <string>room_list_group</string>
+     </property>
+     <layout class="QVBoxLayout" name="verticalLayout_2">
+      <item>
+       <widget class="QTableWidget" name="roomTable">
+        <property name="editTriggers">
+         <set>QAbstractItemView::NoEditTriggers</set>
+        </property>
+        <property name="selectionBehavior">
+         <enum>QAbstractItemView::SelectRows</enum>
+        </property>
+        <property name="objectName">
+         <string>room_table</string>
+        </property>
+        <column>
+         <property name="text">
+          <string>ID</string>
+         </property>
+        </column>
+        <column>
+         <property name="text">
+          <string>Room Name</string>
+         </property>
+        </column>
+        <column>
+         <property name="text">
+          <string>Players</string>
+         </property>
+        </column>
+        <column>
+         <property name="text">
+          <string>Status</string>
+         </property>
+        </column>
+        <column>
+         <property name="text">
+          <string>Action</string>
+         </property>
+        </column>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="refreshButton">
+        <property name="text">
+         <string>Refresh Room List</string>
+        </property>
+        <property name="objectName">
+         <string>refresh_button</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
