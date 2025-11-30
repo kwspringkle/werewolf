@@ -278,33 +278,28 @@ werewolf/
 
 ---
 
-## 🎮 Cách Chơi
-
-### 1. Khởi động MySQL (mỗi lần restart WSL)
-```bash
-sudo service mysql start
-```
-
-### 2. Khởi động Server
+## 🎮 Cách chạy project
+**Lưu ý: Cần connect đến database**
+### 1. Khởi động Server
 ```bash
 cd server
 ./werewolf_server
 ```
 
-### 3. Kết nối Client
+### 2. Kết nối Client
 1. Chạy `python3 main.py`
 2. Nhập host: `127.0.0.1`, port: `5000`
 3. Click **Connect**
 
-### 4. Đăng ký/Đăng nhập
+### 3. Đăng ký/Đăng nhập
 - **Register**: Tạo tài khoản mới
 - **Login**: Đăng nhập với tài khoản có sẵn
 
-### 5. Tạo/Vào phòng
+### 4. Tạo/Vào phòng
 - **Create Room**: Tạo phòng mới (bạn là Host)
 - **Join**: Vào phòng có sẵn
 
-### 6. Bắt đầu game
+### 5. Bắt đầu game
 - Cần tối thiểu **6 người chơi**
 - Host click **Start Game**
 
