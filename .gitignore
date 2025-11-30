@@ -4,6 +4,7 @@
 # Build artifacts
 server/build/
 server/server
+server/werewolf_server
 *.o
 *.a
 *.so
@@ -31,3 +32,10 @@ __pycache__/
 # OS
 .DS_Store
 Thumbs.db
+
+# Virtual Environments
+*/venv/
+*/.venv/
+env/
+.venv/
+venv/
