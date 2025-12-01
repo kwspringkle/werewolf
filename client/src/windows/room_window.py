@@ -254,27 +254,25 @@ class RoomWindow(QtWidgets.QWidget):
             self.toast_manager.error(f"Failed to start game: {str(e)}")
             
     def rebuild_player_list_from_ui(self):
-        """Rebuild player list từ current UI state với host mới"""
+        """Rebuild player list với host mới"""
         my_username = self.window_manager.get_shared_data("username")
         
         # Collect all current players from UI
         players = []
         for i in range(self.player_list.count()):
             item_text = self.player_list.item(i).text()
-            # Extract username (remove icon, (You), - PLAYER/HOST)
-            username = item_text
-            username = username.replace("👑", "").replace("👤", "").replace("💀", "")
-            username = username.replace("(You)", "").replace("- HOST", "").replace("- PLAYER", "").replace("(DEAD)", "")
-            username = username.strip()
+            # Extract username: remove icons and markers
+            username = item_text.replace("👑", "").replace("👤", "")
+            username = username.split(" (You)")[0].split(" - ")[0].strip()
             
             if username:
                 players.append({"username": username})
         
-        # Reorder: host first
+        # Reorder: new host first, others follow
         if self.current_host:
-            # Move host to front
             host_player = None
             other_players = []
+            
             for p in players:
                 if p["username"] == self.current_host:
                     host_player = p
@@ -284,7 +282,7 @@ class RoomWindow(QtWidgets.QWidget):
             if host_player:
                 players = [host_player] + other_players
         
-        # Rebuild UI
+        # Rebuild UI with correct icons and colors
         self.update_player_list(players, my_username)
     
     def on_leave_room(self):
