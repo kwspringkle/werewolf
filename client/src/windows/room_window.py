@@ -253,13 +253,39 @@ class RoomWindow(QtWidgets.QWidget):
         except Exception as e:
             self.toast_manager.error(f"Failed to start game: {str(e)}")
             
-    def request_room_status(self):
-        """Yêu cầu server gửi lại thông tin room đầy đủ"""
-        try:
-            payload = {"room_id": self.current_room_id}
-            self.network_client.send_packet(210, payload)  # GET_ROOM_STATUS_REQ
-        except Exception as e:
-            print(f"[DEBUG] Failed to request room status: {e}")
+    def rebuild_player_list_from_ui(self):
+        """Rebuild player list từ current UI state với host mới"""
+        my_username = self.window_manager.get_shared_data("username")
+        
+        # Collect all current players from UI
+        players = []
+        for i in range(self.player_list.count()):
+            item_text = self.player_list.item(i).text()
+            # Extract username (remove icon, (You), - PLAYER/HOST)
+            username = item_text
+            username = username.replace("👑", "").replace("👤", "").replace("💀", "")
+            username = username.replace("(You)", "").replace("- HOST", "").replace("- PLAYER", "").replace("(DEAD)", "")
+            username = username.strip()
+            
+            if username:
+                players.append({"username": username})
+        
+        # Reorder: host first
+        if self.current_host:
+            # Move host to front
+            host_player = None
+            other_players = []
+            for p in players:
+                if p["username"] == self.current_host:
+                    host_player = p
+                else:
+                    other_players.append(p)
+            
+            if host_player:
+                players = [host_player] + other_players
+        
+        # Rebuild UI
+        self.update_player_list(players, my_username)
     
     def on_leave_room(self):
         """Xử lý khi nhấn nút rời phòng"""
@@ -344,8 +370,8 @@ class RoomWindow(QtWidgets.QWidget):
                         # Someone else became host
                         self.toast_manager.info(f"👑 {new_host} is now the room host")
                     
-                    # Rebuild player list with new host
-                    self.request_room_status()
+                    # Rebuild player list với host mới
+                    self.rebuild_player_list_from_ui()
                 
                 # Update UI
                 self.update_player_count_ui()
@@ -398,8 +424,8 @@ class RoomWindow(QtWidgets.QWidget):
                         else:
                             self.toast_manager.info(f"👑 {new_host} is now the room host")
                         
-                        # Rebuild player list
-                        self.request_room_status()
+                        # Rebuild player list với host mới
+                        self.rebuild_player_list_from_ui()
                     
                     # Update UI
                     self.update_player_count_ui()
