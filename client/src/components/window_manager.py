@@ -61,8 +61,19 @@ class WindowManager(QtCore.QObject):
             WindowManager.DEFAULT_X = x
             WindowManager.DEFAULT_Y = y
             self.window_position_set = True
-            
+        
+        # Đảm bảo window flags cho phép nhận input
+        new_window.setWindowFlags(QtCore.Qt.Window)
+        
+        # Hiển thị và focus window
         new_window.show()
+        new_window.raise_()
+        new_window.activateWindow()
+        
+        # Force set focus sau một delay nhỏ để đảm bảo window đã được hiển thị hoàn toàn
+        QtCore.QTimer.singleShot(50, lambda: new_window.activateWindow())
+        QtCore.QTimer.singleShot(100, lambda: new_window.setFocus())
+        
         self.current_window = window_name
         self.window_changed.emit(window_name)
         

@@ -168,44 +168,89 @@ class ToastManager(QtCore.QObject):
         """Để toast ở bên phải, xếp chồng nếu có nhiều"""
         if not self.parent_widget:
             return
+        
+        try:
+            # Lấy window hiện tại đang visible
+            target_widget = self.parent_widget
+            if hasattr(self.parent_widget, 'window_manager'):
+                try:
+                    current_window = self.parent_widget.window_manager.get_current_window()
+                    if current_window and current_window.isVisible():
+                        target_widget = current_window
+                except RuntimeError:
+                    # Window đã bị deleted, dùng parent_widget
+                    pass
             
-        parent_rect = self.parent_widget.geometry()
-        
-        # Tính vị trí - relative đến parent widget
-        x = parent_rect.width() - toast.width() - 20
-        y = 20
-        
-        # Xếp chồng các toast
-        for existing_toast in self.active_toasts:
-            if existing_toast.isVisible():
-                y += existing_toast.height() + self.spacing
-        
-        # Vị trí trong parent widget
-        toast.move(x, y)
+            # Đặt parent cho toast là window hiện tại
+            toast.setParent(target_widget)
+            
+            parent_rect = target_widget.geometry()
+            
+            # Tính vị trí - relative đến parent widget
+            x = parent_rect.width() - toast.width() - 20
+            y = 20
+            
+            # Xếp chồng các toast
+            for existing_toast in self.active_toasts:
+                try:
+                    if existing_toast.isVisible():
+                        y += existing_toast.height() + self.spacing
+                except RuntimeError:
+                    continue
+            
+            # Vị trí trong parent widget
+            toast.move(x, y)
+        except Exception:
+            # Fallback: đặt toast ở vị trí mặc định
+            pass
         
     def remove_toast(self, toast):
         """Xóa toast khỏi danh sách active"""
-        if toast in self.active_toasts:
-            self.active_toasts.remove(toast)
-            self.reposition_toasts()
+        try:
+            if toast in self.active_toasts:
+                self.active_toasts.remove(toast)
+                self.reposition_toasts()
+        except RuntimeError:
+            # Widget đã bị xóa
+            if toast in self.active_toasts:
+                self.active_toasts.remove(toast)
             
     def reposition_toasts(self):
         """Đặt lại vị trí cho tất cả các toast đang hoạt động"""
-        y = 20
-        for toast in self.active_toasts:
-            if toast.isVisible():
-                parent_rect = self.parent_widget.geometry()
-                x = parent_rect.width() - toast.width() - 20
-                
-                # Animate position change
-                anim = QtCore.QPropertyAnimation(toast, b"pos")
-                anim.setDuration(200)
-                anim.setStartValue(toast.pos())
-                anim.setEndValue(QtCore.QPoint(x, y))
-                anim.setEasingCurve(QtCore.QEasingCurve.InOutQuad)
-                anim.start()
-                
-                y += toast.height() + self.spacing
+        try:
+            # Lấy window hiện tại đang visible
+            target_widget = self.parent_widget
+            if hasattr(self.parent_widget, 'window_manager'):
+                try:
+                    current_window = self.parent_widget.window_manager.get_current_window()
+                    if current_window and current_window.isVisible():
+                        target_widget = current_window
+                except RuntimeError:
+                    # Window đã bị deleted, dùng parent_widget
+                    pass
+            
+            y = 20
+            for toast in self.active_toasts:
+                try:
+                    if toast.isVisible():
+                        parent_rect = target_widget.geometry()
+                        x = parent_rect.width() - toast.width() - 20
+                        
+                        # Animate position change
+                        anim = QtCore.QPropertyAnimation(toast, b"pos")
+                        anim.setDuration(200)
+                        anim.setStartValue(toast.pos())
+                        anim.setEndValue(QtCore.QPoint(x, y))
+                        anim.setEasingCurve(QtCore.QEasingCurve.InOutQuad)
+                        anim.start()
+                        
+                        y += toast.height() + self.spacing
+                except RuntimeError:
+                    # Toast đã bị xóa, bỏ qua
+                    continue
+        except Exception:
+            # Ignore any errors during repositioning
+            pass
                 
     def info(self, message, duration=3000):
         """Hiển thị thông báo info"""

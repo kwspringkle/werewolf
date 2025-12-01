@@ -31,6 +31,9 @@ class LoginWindow(QtWidgets.QWidget):
         if self.network_client:
             self.recv_timer.start(100)
         
+        # Set focus to username input
+        QtCore.QTimer.singleShot(100, lambda: self.username_input.setFocus())
+        
     def setup_ui(self):
         """Thiết lập giao diện người dùng"""
         self.setWindowTitle("Werewolf - Login")

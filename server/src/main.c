@@ -79,7 +79,11 @@ int main() {
             int addrlen = sizeof(address);
             new_socket = accept(server_fd, (struct sockaddr*)&address, (socklen_t*)&addrlen);
 
-            printf("Client connected: %d\n", new_socket);
+            char client_ip[INET_ADDRSTRLEN];
+            inet_ntop(AF_INET, &address.sin_addr, client_ip, INET_ADDRSTRLEN);
+            printf("Client connected: socket=%d from %s:%d\n", 
+                new_socket, client_ip, ntohs(address.sin_port));
+
 
             for (int i = 0; i < 30; i++) {
                 if (clients[i] == 0) {

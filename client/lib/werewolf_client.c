@@ -47,7 +47,15 @@ int ww_client_connect(WerewolfClient* c, const char* host, int port) {
         closesocket(c->sock);
         return -1;
     }
+    
     c->is_connected = 1;
+    
+    // Set socket to non-blocking mode AFTER successful connection
+    int flags = fcntl(c->sock, F_GETFL, 0);
+    if (flags >= 0) {
+        fcntl(c->sock, F_SETFL, flags | O_NONBLOCK);
+    }
+    
     return 0;
 }
 
@@ -68,24 +76,37 @@ int ww_client_send(WerewolfClient* c, unsigned short header, const char* json) {
 
     if (plen > 0) memcpy(buf + 6, json, plen);
 
-    int sent = send(c->sock, buf, tlen, 0);
-    free(buf);
-
-    if (sent <= 0) {
-        set_error(c, "Send failed");
-        return -1;
+    // For send, we need to send all data even in non-blocking mode
+    int total_sent = 0;
+    while (total_sent < tlen) {
+        int sent = send(c->sock, buf + total_sent, tlen - total_sent, 0);
+        if (sent < 0) {
+            if (errno == EWOULDBLOCK || errno == EAGAIN) {
+                // Wait a bit and retry
+                continue;
+            }
+            set_error(c, "Send failed");
+            free(buf);
+            return -1;
+        }
+        total_sent += sent;
     }
-
-    return sent;
+    
+    free(buf);
+    return total_sent;
 }
 
-// Hàm nhận dữ liệu
+// Hàm nhận dữ liệu (non-blocking)
 int ww_client_receive(WerewolfClient* c, unsigned short* h, char* out, int max) {
     if (!c || !c->is_connected) return -1;
 
     unsigned char hdr[2];
     int r = recv(c->sock, hdr, 2, 0);
-    if (r <= 0) return 0;
+    if (r <= 0) {
+        // Non-blocking: EWOULDBLOCK/EAGAIN means no data available
+        if (errno == EWOULDBLOCK || errno == EAGAIN) return 0;
+        return 0;  // Connection closed or error
+    }
 
     *h = (hdr[0] << 8) | hdr[1];
 
@@ -104,9 +125,15 @@ int ww_client_receive(WerewolfClient* c, unsigned short* h, char* out, int max) 
     int got = 0;
     while (got < len) {
         r = recv(c->sock, out + got, len - got, 0);
-        if (r <= 0) return 0;
+        if (r <= 0) {
+            if (errno == EWOULDBLOCK || errno == EAGAIN) break;  // Try again later
+            return 0;
+        }
         got += r;
     }
+
+    // Only return success if we got all data
+    if (got < len) return 0;
 
     out[len] = 0;
     return *h;
