@@ -1,6 +1,4 @@
 from PyQt5 import QtWidgets, QtCore, QtGui
-
-
 class RoleCardWindow(QtWidgets.QDialog):
     """Window hiển thị role card với timer 30s"""
     

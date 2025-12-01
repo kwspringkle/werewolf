@@ -16,9 +16,11 @@ static void set_error(WerewolfClient* c, const char* msg) {
 WerewolfClient* ww_client_create() {
     WerewolfClient* c = malloc(sizeof(WerewolfClient));
     if (!c) return NULL;
-
     c->sock = INVALID_SOCKET_VALUE;
     c->is_connected = 0;
+    c->rbuf = NULL;
+    c->rbuf_len = 0;
+    c->rbuf_cap = 0;
     memset(c->last_error, 0, sizeof(c->last_error));
     return c;
 }
@@ -49,12 +51,8 @@ int ww_client_connect(WerewolfClient* c, const char* host, int port) {
     }
     
     c->is_connected = 1;
-    
-    // Set socket to non-blocking mode AFTER successful connection
     int flags = fcntl(c->sock, F_GETFL, 0);
-    if (flags >= 0) {
-        fcntl(c->sock, F_SETFL, flags | O_NONBLOCK);
-    }
+    if (flags >= 0) fcntl(c->sock, F_SETFL, flags | O_NONBLOCK);
     
     return 0;
 }
@@ -76,13 +74,13 @@ int ww_client_send(WerewolfClient* c, unsigned short header, const char* json) {
 
     if (plen > 0) memcpy(buf + 6, json, plen);
 
-    // For send, we need to send all data even in non-blocking mode
+    // Gửi tất cả dữ liệu ngay cả khi ở chế độ non-blocking
     int total_sent = 0;
     while (total_sent < tlen) {
         int sent = send(c->sock, buf + total_sent, tlen - total_sent, 0);
         if (sent < 0) {
             if (errno == EWOULDBLOCK || errno == EAGAIN) {
-                // Wait a bit and retry
+                // Đợi rồi thử lại
                 continue;
             }
             set_error(c, "Send failed");
@@ -97,46 +95,58 @@ int ww_client_send(WerewolfClient* c, unsigned short header, const char* json) {
 }
 
 // Hàm nhận dữ liệu (non-blocking)
+static int ensure_capacity(WerewolfClient* c, size_t need) {
+    if (need <= c->rbuf_cap) return 1;
+    size_t new_cap = c->rbuf_cap ? c->rbuf_cap : 8192;
+    while (new_cap < need) new_cap *= 2;
+    unsigned char* nb = realloc(c->rbuf, new_cap);
+    if (!nb) return 0;
+    c->rbuf = nb;
+    c->rbuf_cap = new_cap;
+    return 1;
+}
+
 int ww_client_receive(WerewolfClient* c, unsigned short* h, char* out, int max) {
     if (!c || !c->is_connected) return -1;
 
-    unsigned char hdr[2];
-    int r = recv(c->sock, hdr, 2, 0);
-    if (r <= 0) {
-        // Non-blocking: EWOULDBLOCK/EAGAIN means no data available
-        if (errno == EWOULDBLOCK || errno == EAGAIN) return 0;
-        return 0;  // Connection closed or error
-    }
-
-    *h = (hdr[0] << 8) | hdr[1];
-
-    unsigned char lenbuf[4];
-    r = recv(c->sock, lenbuf, 4, 0);
-    if (r < 4) return 0;
-
-    int len = (lenbuf[0] << 24) | (lenbuf[1] << 16) |
-              (lenbuf[2] << 8)  | lenbuf[3];
-
-    if (len >= max) {
-        set_error(c, "Payload too large");
+    // Đọc bất kỳ byte nào có sẵn
+    unsigned char tmp[4096];
+    int r = recv(c->sock, tmp, sizeof(tmp), 0);
+    if (r > 0) {
+        if (!ensure_capacity(c, c->rbuf_len + r)) {
+            set_error(c, "Buffer alloc failed");
+            return -1;
+        }
+        memcpy(c->rbuf + c->rbuf_len, tmp, r);
+        c->rbuf_len += r;
+    } else if (r < 0) {
+        if (errno != EWOULDBLOCK && errno != EAGAIN) {
+            set_error(c, "Recv error");
+            return -1;
+        }
+    } else if (r == 0) {
+        set_error(c, "Server closed");
+        c->is_connected = 0;
         return -1;
     }
 
-    int got = 0;
-    while (got < len) {
-        r = recv(c->sock, out + got, len - got, 0);
-        if (r <= 0) {
-            if (errno == EWOULDBLOCK || errno == EAGAIN) break;  // Try again later
-            return 0;
-        }
-        got += r;
+    // Cần ít nhất 6 byte (header + độ dài)
+    if (c->rbuf_len < 6) return 0;
+    uint16_t header = (uint16_t)((c->rbuf[0] << 8) | c->rbuf[1]);
+    uint32_t length = (uint32_t)((c->rbuf[2] << 24) | (c->rbuf[3] << 16) | (c->rbuf[4] << 8) | c->rbuf[5]);
+    size_t frame_size = 6 + length;
+    if (c->rbuf_len < frame_size) return 0; // đợi thêm dữ liệu
+    if ((int)length >= max) {
+        set_error(c, "Payload too large");
+        return -1;
     }
-
-    // Only return success if we got all data
-    if (got < len) return 0;
-
-    out[len] = 0;
-    return *h;
+    memcpy(out, c->rbuf + 6, length);
+    out[length] = 0;
+    *h = header;
+    size_t remaining = c->rbuf_len - frame_size;
+    if (remaining > 0) memmove(c->rbuf, c->rbuf + frame_size, remaining);
+    c->rbuf_len = remaining;
+    return header;
 }
 
 // Khi client ngắt kết nối
@@ -153,6 +163,7 @@ void ww_client_disconnect(WerewolfClient* c) {
 void ww_client_destroy(WerewolfClient* c) {
     if (!c) return;
     ww_client_disconnect(c);
+    if (c->rbuf) free(c->rbuf);
     free(c);
 }
 
