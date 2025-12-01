@@ -1,22 +1,15 @@
 #ifndef WEREWOLF_CLIENT_H
 #define WEREWOLF_CLIENT_H
 
-#ifdef _WIN32
-#include <winsock2.h>
-#include <ws2tcpip.h>
-typedef SOCKET socket_t;
-#define INVALID_SOCKET_VALUE INVALID_SOCKET
-#define SOCKET_ERROR_VALUE SOCKET_ERROR
-#else
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <fcntl.h>
+
 typedef int socket_t;
 #define INVALID_SOCKET_VALUE -1
 #define SOCKET_ERROR_VALUE -1
 #define closesocket close
-#endif
 
 typedef struct {
     socket_t sock;

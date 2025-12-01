@@ -50,6 +50,14 @@ class WelcomeWindow(QtWidgets.QWidget):
         conn_group = QtWidgets.QGroupBox("Server Connection")
         conn_group.setObjectName("connection_group")
         conn_layout = QtWidgets.QFormLayout()
+
+        # Thêm helper text
+        help_label = QtWidgets.QLabel(
+            "💡 For local: 127.0.0.1\n"
+            "💡 For LAN: Use server's IP (e.g., 192.168.1.100)\n"
+            "💡 Server must be running and port 5000 open"
+        )
+        help_label.setStyleSheet("color: #888; font-size: 10px;")
         
         self.host_input = QtWidgets.QLineEdit("127.0.0.1")
         self.host_input.setObjectName("host_input")
@@ -58,6 +66,7 @@ class WelcomeWindow(QtWidgets.QWidget):
         self.connect_button = QtWidgets.QPushButton("Connect")
         self.connect_button.setObjectName("connect_button")
         
+        conn_layout.addRow(help_label)
         conn_layout.addRow("Host:", self.host_input)
         conn_layout.addRow("Port:", self.port_input)
         conn_layout.addRow("", self.connect_button)

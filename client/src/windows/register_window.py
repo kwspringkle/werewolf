@@ -28,8 +28,15 @@ class RegisterWindow(QtWidgets.QWidget):
         super().showEvent(event)
         # Get network client from shared data
         self.network_client = self.window_manager.get_shared_data("network_client")
+        print(f"[DEBUG] Register window shown, network_client: {self.network_client}")
         if self.network_client:
+            print("[DEBUG] Starting recv_timer for register window")
             self.recv_timer.start(100)
+        else:
+            print("[ERROR] No network_client available!")
+        
+        # Set focus to username input
+        QtCore.QTimer.singleShot(100, lambda: self.username_input.setFocus())
         
     def setup_ui(self):
         """Thiết lập giao diện người dùng"""
@@ -107,6 +114,8 @@ class RegisterWindow(QtWidgets.QWidget):
         password = self.password_input.text()
         confirm_password = self.confirm_password_input.text()
         
+        print(f"[DEBUG] Register clicked: username='{username}', password_len={len(password)}")
+        
         if not username or not password:
             self.toast_manager.warning("Please enter username and password")
             return
@@ -122,12 +131,20 @@ class RegisterWindow(QtWidgets.QWidget):
         if password != confirm_password:
             self.toast_manager.error("Passwords do not match")
             return
+        
+        if not self.network_client:
+            self.toast_manager.error("Not connected to server")
+            print("[ERROR] network_client is None!")
+            return
             
         try:
             payload = {"username": username, "password": password}
-            self.network_client.send_packet(103, payload)  # REGISTER_REQ
+            print(f"[DEBUG] Sending REGISTER_REQ (103): {payload}")
+            result = self.network_client.send_packet(103, payload)  # REGISTER_REQ
+            print(f"[DEBUG] Send result: {result}")
             self.toast_manager.info("Registering...")
         except Exception as e:
+            print(f"[ERROR] Register send failed: {e}")
             self.toast_manager.error(f"Failed to send registration: {str(e)}")
             
     def on_back(self):
@@ -142,18 +159,23 @@ class RegisterWindow(QtWidgets.QWidget):
             
             if header is None:
                 return  # No data
-                
+            
+            print(f"[DEBUG] Register window received packet: header={header}, payload={payload}")
             self.handle_packet(header, payload)
             
         except Exception as e:
+            print(f"[ERROR] Receive error in register window: {e}")
             self.toast_manager.error(f"Receive error: {str(e)}")
             self.recv_timer.stop()
             
     def handle_packet(self, header, payload):
         """Xử lý gói tin nhận được"""
+        print(f"[DEBUG] Register handle_packet: header={header}, payload={payload}")
         if header == 104:  # REGISTER_RES
             if payload.get("status") == "success":
-                username = payload.get("username")
+                # Lấy username từ input vì server không gửi lại
+                username = self.username_input.text().strip()
+                print(f"[SUCCESS] Registration successful for {username}")
                 self.toast_manager.success(f"Account created! Welcome {username}")
                 
                 # Clear inputs
@@ -166,7 +188,10 @@ class RegisterWindow(QtWidgets.QWidget):
                 self.window_manager.navigate_to("login")
             else:
                 msg = payload.get("message", "Unknown error")
+                print(f"[ERROR] Registration failed: {msg}")
                 self.toast_manager.error(f"Registration failed: {msg}")
+        else:
+            print(f"[WARNING] Unexpected packet in register window: {header}")
                 
     def closeEvent(self, event):
         """Xử lý khi đóng cửa sổ"""

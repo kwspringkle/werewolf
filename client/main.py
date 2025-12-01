@@ -30,6 +30,9 @@ class WerewolfApplication:
         # Khởi tạo window manager
         self.window_manager = WindowManager(self.app)
         
+        # Share network client với các cửa sổ
+        self.window_manager.set_shared_data("network_client", self.network_client)
+        
         # Khởi tạo các cửa sổ
         self.init_windows()
         
@@ -46,20 +49,18 @@ class WerewolfApplication:
             
     def init_windows(self):
         """Khởi tạo tất cả các cửa sổ"""
-        # Create a main container widget for toast notifications
-        self.main_container = QtWidgets.QWidget()
-        self.main_container.setWindowTitle("Werewolf Game")
-        self.main_container.resize(800, 600)
-        
-        # Quản lý toast
-        self.toast_manager = ToastManager(self.main_container)
-        
-        # Khởi tạo các cửa sổ
+        # Khởi tạo welcome window đầu tiên
         self.welcome_window = WelcomeWindow(
             self.network_client,
-            self.toast_manager,
+            None,  # toast_manager sẽ được tạo sau
             self.window_manager
         )
+        
+        # Tạo toast manager với welcome window làm parent
+        self.toast_manager = ToastManager(self.welcome_window)
+        
+        # Cập nhật toast manager cho welcome window
+        self.welcome_window.toast_manager = self.toast_manager
         
         self.register_window = RegisterWindow(
             self.toast_manager,
