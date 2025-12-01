@@ -1,4 +1,4 @@
-from PyQt5 import QtWidgets, QtCore
+from PyQt5 import QtWidgets, QtCore, QtGui
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -20,6 +20,7 @@ class RoomWindow(QtWidgets.QWidget):
         self.current_room_id = None
         self.is_host = False
         self.current_player_count = 0
+        self.current_host = None  # Lưu host hiện tại
         
         self.setObjectName("room_window")
         self.setup_ui()
@@ -71,6 +72,14 @@ class RoomWindow(QtWidgets.QWidget):
         players_group = QtWidgets.QGroupBox("Players in Room")
         players_group.setObjectName("players_group")
         players_layout = QtWidgets.QVBoxLayout()
+        
+        # Legend
+        legend_layout = QtWidgets.QHBoxLayout()
+        legend_label = QtWidgets.QLabel("👑 = Host  |  👤 = Player")
+        legend_label.setStyleSheet("color: #FFD700; font-size: 11px; padding: 5px;")
+        legend_layout.addWidget(legend_label)
+        legend_layout.addStretch()
+        players_layout.addLayout(legend_layout)
         
         # Thông tin số lượng người chơi
         self.player_count_label = QtWidgets.QLabel(f"Players: 0/{self.MAX_PLAYERS_PER_ROOM}")
@@ -125,6 +134,13 @@ class RoomWindow(QtWidgets.QWidget):
         self.is_host = self.window_manager.get_shared_data("is_host", False)
         username = self.window_manager.get_shared_data("username")
         
+        # Lấy thông tin host từ room_players (player đầu tiên là host)
+        players = self.window_manager.get_shared_data("room_players", [])
+        if players:
+            self.current_host = players[0].get("username")
+        else:
+            self.current_host = username if self.is_host else None
+        
         # Update UI
         self.room_title_label.setText(f"🏠 {room_name}")
         
@@ -141,7 +157,6 @@ class RoomWindow(QtWidgets.QWidget):
             self.start_game_button.setEnabled(False)  # Will be enabled when enough players
         
         # Load players
-        players = self.window_manager.get_shared_data("room_players", [])
         self.update_player_list(players, username)
         self.current_player_count = len(players)
         self.update_player_count_ui()
@@ -158,13 +173,32 @@ class RoomWindow(QtWidgets.QWidget):
         """Cập nhật widget danh sách người chơi"""
         self.player_list.clear()
         
-        for player in players:
+        # Player đầu tiên là host
+        for i, player in enumerate(players):
             username = player.get("username", "Unknown")
+            is_host = (i == 0) or (username == self.current_host)
+            is_me = (username == current_username)
             
-            if username == current_username:
-                self.player_list.addItem(f"👤 {username} (You)")
+            # Build text
+            if is_host:
+                icon = "👑"
+                role_text = "HOST"
             else:
-                self.player_list.addItem(f"👤 {username}")
+                icon = "👤"
+                role_text = "PLAYER"
+            
+            me_marker = " (You)" if is_me else ""
+            display_text = f"{icon} {username}{me_marker} - {role_text}"
+            
+            item = QtWidgets.QListWidgetItem(display_text)
+            
+            # Color coding
+            if is_host:
+                item.setForeground(QtGui.QColor("#FFD700"))  # Gold for host
+            else:
+                item.setForeground(QtGui.QColor("#FFFFFF"))  # White for player
+            
+            self.player_list.addItem(item)
                 
     def update_player_count_ui(self):
         """Cập nhật nhãn số lượng người chơi và trạng thái nút bắt đầu"""
@@ -219,6 +253,14 @@ class RoomWindow(QtWidgets.QWidget):
         except Exception as e:
             self.toast_manager.error(f"Failed to start game: {str(e)}")
             
+    def request_room_status(self):
+        """Yêu cầu server gửi lại thông tin room đầy đủ"""
+        try:
+            payload = {"room_id": self.current_room_id}
+            self.network_client.send_packet(210, payload)  # GET_ROOM_STATUS_REQ
+        except Exception as e:
+            print(f"[DEBUG] Failed to request room status: {e}")
+    
     def on_leave_room(self):
         """Xử lý khi nhấn nút rời phòng"""
         try:
@@ -272,6 +314,7 @@ class RoomWindow(QtWidgets.QWidget):
             elif update_type == "player_left":
                 player_username = payload.get("username")
                 current = payload.get("current_players", 0)
+                new_host = payload.get("new_host")  # Server gửi host mới nếu có
                 self.current_player_count = current
                 
                 self.toast_manager.warning(f"{player_username} left ({current} players)")
@@ -281,6 +324,28 @@ class RoomWindow(QtWidgets.QWidget):
                     if player_username in self.player_list.item(i).text():
                         self.player_list.takeItem(i)
                         break
+                
+                # Check if host changed
+                if new_host and new_host != self.current_host:
+                    old_host = self.current_host
+                    self.current_host = new_host
+                    my_username = self.window_manager.get_shared_data("username")
+                    
+                    if new_host == my_username:
+                        # I became host
+                        self.is_host = True
+                        self.window_manager.set_shared_data("is_host", True)
+                        self.toast_manager.success(f"👑 You are now the room host!")
+                        
+                        # Update UI
+                        self.start_game_button.setVisible(True)
+                        self.room_info_label.setText(f"Room ID: {self.current_room_id} - You are HOST 👑")
+                    else:
+                        # Someone else became host
+                        self.toast_manager.info(f"👑 {new_host} is now the room host")
+                    
+                    # Rebuild player list with new host
+                    self.request_room_status()
                 
                 # Update UI
                 self.update_player_count_ui()
@@ -292,20 +357,56 @@ class RoomWindow(QtWidgets.QWidget):
                     
             elif update_type == "player_disconnected":
                 player_username = payload.get("username")
-                message = payload.get("message", "Player disconnected")
+                game_started = payload.get("game_started", False)
                 
-                self.toast_manager.error(f"💀 {player_username} disconnected - Marked as DEAD")
-                
-                # Mark player as dead in list (strikethrough)
-                for i in range(self.player_list.count()):
-                    item = self.player_list.item(i)
-                    if player_username in item.text() and "💀" not in item.text():
-                        # Update item text with skull icon
-                        current_text = item.text()
-                        item.setText(f"💀 {player_username} (DEAD)")
-                        # Make it gray
-                        item.setForeground(QtCore.Qt.gray)
-                        break
+                if game_started:
+                    # Sau khi game start: mark as dead
+                    self.toast_manager.error(f"💀 {player_username} disconnected - Marked as DEAD")
+                    
+                    # Mark player as dead in list
+                    for i in range(self.player_list.count()):
+                        item = self.player_list.item(i)
+                        if player_username in item.text() and "💀" not in item.text():
+                            item.setText(f"💀 {player_username} (DEAD)")
+                            item.setForeground(QtGui.QColor("#555555"))  # Gray
+                            break
+                else:
+                    # Trước khi game start: treat như player_left
+                    current = payload.get("current_players", 0)
+                    self.current_player_count = current
+                    
+                    self.toast_manager.warning(f"{player_username} disconnected ({current} players)")
+                    
+                    # Remove from list
+                    for i in range(self.player_list.count()):
+                        if player_username in self.player_list.item(i).text():
+                            self.player_list.takeItem(i)
+                            break
+                    
+                    # Check if host changed
+                    new_host = payload.get("new_host")
+                    if new_host and new_host != self.current_host:
+                        self.current_host = new_host
+                        my_username = self.window_manager.get_shared_data("username")
+                        
+                        if new_host == my_username:
+                            self.is_host = True
+                            self.window_manager.set_shared_data("is_host", True)
+                            self.toast_manager.success(f"👑 You are now the room host!")
+                            self.start_game_button.setVisible(True)
+                            self.room_info_label.setText(f"Room ID: {self.current_room_id} - You are HOST 👑")
+                        else:
+                            self.toast_manager.info(f"👑 {new_host} is now the room host")
+                        
+                        # Rebuild player list
+                        self.request_room_status()
+                    
+                    # Update UI
+                    self.update_player_count_ui()
+                    
+                    if self.is_host and current < self.MIN_PLAYERS:
+                        needed = self.MIN_PLAYERS - current
+                        self.toast_manager.warning(f"⚠️ Need {needed} more player{'s' if needed > 1 else ''} to start!")
                         
         elif header == 209:  # LEAVE_ROOM_RES
             if payload.get("status") == "success":
