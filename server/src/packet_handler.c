@@ -421,6 +421,7 @@ void handle_disconnect(int client_fd) {
                     cJSON_AddStringToObject(update, "type", "player_disconnected");
                     cJSON_AddStringToObject(update, "username", username);
                     cJSON_AddStringToObject(update, "message", "Player disconnected and is considered dead");
+                    cJSON_AddBoolToObject(update, "game_started", true);  // Game đã start
 
                     char *update_str = cJSON_PrintUnformatted(update);
                     broadcast_room(room_index, ROOM_STATUS_UPDATE, update_str);
@@ -442,16 +443,27 @@ void handle_disconnect(int client_fd) {
                         rooms[room_index].status = ROOM_WAITING;
                         rooms[room_index].host_socket = 0;
                     } else {
+                        int host_changed = 0;
+                        char new_host_username[50] = "";
+                        
                         if (rooms[room_index].host_socket == client_fd) {
                             rooms[room_index].host_socket = rooms[room_index].players[0].socket;
+                            strncpy(new_host_username, rooms[room_index].players[0].username, 49);
+                            host_changed = 1;
                             printf("Host changed to %s in room %d\n",
-                                   rooms[room_index].players[0].username, rooms[room_index].id);
+                                   new_host_username, rooms[room_index].id);
                         }
 
                         cJSON *update = cJSON_CreateObject();
-                        cJSON_AddStringToObject(update, "type", "player_left");
+                        cJSON_AddStringToObject(update, "type", "player_disconnected");
                         cJSON_AddStringToObject(update, "username", username);
                         cJSON_AddNumberToObject(update, "current_players", rooms[room_index].current_players);
+                        cJSON_AddBoolToObject(update, "game_started", false);  // Game chưa start
+                        
+                        // Thêm thông tin host mới nếu có thay đổi
+                        if (host_changed) {
+                            cJSON_AddStringToObject(update, "new_host", new_host_username);
+                        }
 
                         char *update_str = cJSON_PrintUnformatted(update);
                         broadcast_room(room_index, ROOM_STATUS_UPDATE, update_str);
@@ -553,11 +565,20 @@ void handle_leave_room(int client_fd, cJSON *json) {
     strncpy(username, rooms[room_index].players[player_index].username, sizeof(username) - 1);
     username[49] = '\0';
 
+    // Check if this player is host BEFORE removing
+    int was_host = (rooms[room_index].host_socket == client_fd);
+    int host_changed = 0;
+    char new_host_username[50] = "";
+
+    // Remove player from list
     for (int i = player_index; i < rooms[room_index].current_players - 1; i++) {
         rooms[room_index].players[i] = rooms[room_index].players[i + 1];
     }
     rooms[room_index].current_players--;
 
+    printf("Player %s left room %d\n", username, rooms[room_index].id);
+
+    // Send success response to leaving player
     cJSON_AddStringToObject(response, "status", "success");
     cJSON_AddStringToObject(response, "message", "Left room successfully");
     char *res_str = cJSON_PrintUnformatted(response);
@@ -565,26 +586,35 @@ void handle_leave_room(int client_fd, cJSON *json) {
     free(res_str);
     cJSON_Delete(response);
 
-    printf("Player %s left room %d\n", username, rooms[room_index].id);
-
+    // Check if room is empty
     if (rooms[room_index].current_players == 0) {
         printf("Room %d is now empty and will be deleted\n", rooms[room_index].id);
         rooms[room_index].id = 0;
         rooms[room_index].name[0] = '\0';
         rooms[room_index].status = ROOM_WAITING;
         rooms[room_index].host_socket = 0;
-    } 
-
-    if (rooms[room_index].host_socket == client_fd) {
-        rooms[room_index].host_socket = rooms[room_index].players[0].socket;
-        printf("Host changed to %s in room %d\n",
-               rooms[room_index].players[0].username, rooms[room_index].id);
+        return;  // No need to broadcast if room is empty
     }
 
+    // If the host left, assign new host
+    if (was_host) {
+        rooms[room_index].host_socket = rooms[room_index].players[0].socket;
+        strncpy(new_host_username, rooms[room_index].players[0].username, 49);
+        new_host_username[49] = '\0';
+        host_changed = 1;
+        printf("Host changed to %s in room %d\n", new_host_username, rooms[room_index].id);
+    }
+
+    // Broadcast to remaining players
     cJSON *update = cJSON_CreateObject();
     cJSON_AddStringToObject(update, "type", "player_left");
     cJSON_AddStringToObject(update, "username", username);
     cJSON_AddNumberToObject(update, "current_players", rooms[room_index].current_players);
+    
+    // Add new host info if changed
+    if (host_changed) {
+        cJSON_AddStringToObject(update, "new_host", new_host_username);
+    }
 
     char *update_str = cJSON_PrintUnformatted(update);
     broadcast_room(room_index, ROOM_STATUS_UPDATE, update_str);
