@@ -796,24 +796,22 @@ void handle_start_game(int client_fd, cJSON *json) {
         roles[i] = roles[j];
         roles[j] = temp;
     }
-    
-    // Assign shuffled roles to players and send individual role info
-    printf("\n=== ROLE DISTRIBUTION ===\n");
+
+    // Assign roles to all players
     for (int i = 0; i < num_players; i++) {
         rooms[room_index].players[i].role = roles[i];
         rooms[room_index].players[i].is_alive = 1;
-        
-        // Send role to each player using role_manager
+    }
+
+    // Send role info to all players
+    for (int i = 0; i < num_players; i++) {
         send_role_info_to_player(room_index, i);
     }
-    printf("=== END ROLE DISTRIBUTION ===\n\n");
-    
+
     cJSON_Delete(response);
 
-    printf("✓ Game started in room %d with %d players\n", 
-           room_id, rooms[room_index].current_players);
-    printf("  Role distribution: %d Werewolves, 1 Seer, 1 Guard, %d Villagers\n", 
-           num_werewolves, num_villagers);
+    printf("Game started in room %d with %d players (%d Werewolves, 1 Seer, 1 Guard, %d Villagers)\n",
+           room_id, rooms[room_index].current_players, num_werewolves, num_villagers);
 }
 
 void process_packet(int client_fd, uint16_t header, const char *payload) {

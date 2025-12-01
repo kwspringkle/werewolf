@@ -420,9 +420,31 @@ class RoomClient(QtWidgets.QWidget):
             elif header == 302:  # GAME_START_RES_AND_ROLE
                 self.log.append(f"← GAME STARTED!")
                 if data.get("status") == "success":
-                    self.log.append(f"   ✓ {data.get('message')}")
+                    role = data.get("role", 0)
+                    role_name = data.get("role_name", "Unknown")
+                    description = data.get("role_description", "")
+
+                    self.log.append(f"   ✓ Your role: {role_name}")
+                    self.log.append(f"   📜 {description}")
+
+                    # ✅ Đổi từ "teammates" thành "werewolf_team"
+                    teammates = data.get("werewolf_team", [])
+                    if teammates and len(teammates) > 0:
+                        self.log.append(f"   🐺 Your werewolf teammates:")
+                        for mate in teammates:
+                            # Nếu server gửi string thay vì object
+                            if isinstance(mate, str):
+                                self.log.append(f"      • {mate}")
+                            else:
+                                # Nếu server gửi object với username và user_id
+                                username = mate.get("username", "Unknown") if isinstance(mate, dict) else mate
+                                self.log.append(f"      • {username}")
+
+                    # Disable buttons
                     self.btn_start_game.setEnabled(False)
-                    self.btn_leave_room.setEnabled(False)
+                    self.btn_leave_room.setText("Surrender")
+                    self.btn_create_room.setEnabled(False)
+                    self.btn_refresh_rooms.setEnabled(False)
 
             else:
                 self.log.append(f"← Received header={header}: {payload_str}")

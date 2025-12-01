@@ -77,26 +77,13 @@ void send_role_info_to_player(int room_index, int player_index) {
     cJSON *role_response = cJSON_CreateObject();
     cJSON_AddStringToObject(role_response, "status", "success");
     cJSON_AddStringToObject(role_response, "message", "Game started");
-    
+
     int role = rooms[room_index].players[player_index].role;
     cJSON_AddNumberToObject(role_response, "role", role);
-    
-    // Lấy tên vai trò để ghi log
-    const char *role_name = "Unknown";
-    switch(role) {
-        case ROLE_WEREWOLF: role_name = "Werewolf"; break;
-        case ROLE_SEER: role_name = "Seer"; break;
-        case ROLE_GUARD: role_name = "Guard"; break;
-        default: role_name = "Villager"; break;
-    }
-    
-    // Ghi log phân công vai trò cho người chơi
-    printf("  -> Player %s will be %s\n", 
-           rooms[room_index].players[player_index].username, role_name);
-    
+
     // Lấy thông tin cụ thể của vai trò
     cJSON *role_info = get_role_info_json(room_index, player_index);
-    
+
     // Sao chép tất cả các trường từ role_info sang role_response
     cJSON *item = role_info->child;
     while (item) {
@@ -112,9 +99,8 @@ void send_role_info_to_player(int room_index, int player_index) {
         item = item->next;
     }
     cJSON_Delete(role_info);
-    
+
     char *role_str = cJSON_PrintUnformatted(role_response);
-    printf("    Sending role packet: %s\n", role_str);
     send_packet(rooms[room_index].players[player_index].socket, GAME_START_RES_AND_ROLE, role_str);
     free(role_str);
     cJSON_Delete(role_response);
