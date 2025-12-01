@@ -341,14 +341,61 @@ class RoomClient(QtWidgets.QWidget):
                     self.log.append(f"   → {username} joined the room ({current} players)")
                     if username != self.username:
                         self.player_list.addItem(f"👤 {username}")
+                
                 elif update_type == "player_left":
                     username = data.get("username")
                     current = data.get("current_players")
+                    new_host = data.get("new_host")  # ✅ Lấy thông tin host mới
+                    
                     self.log.append(f"   ← {username} left the room ({current} players)")
+                    
+                    # Xóa player khỏi list
                     for i in range(self.player_list.count()):
                         if username in self.player_list.item(i).text():
                             self.player_list.takeItem(i)
                             break
+                    
+                    # ✅ Xử lý host mới
+                    if new_host:
+                        self.log.append(f"   👑 {new_host} is now the host")
+                        
+                        # Nếu bạn là host mới
+                        if new_host == self.username:
+                            self.is_host = True
+                            self.btn_start_game.setEnabled(True)
+                            self.room_info_label.setText(
+                                f"{self.room_info_label.text().split(' -')[0]} - You are HOST"
+                            )
+                            self.log.append("   ✓ You are now the host!")
+                        
+                        # Cập nhật player list để hiển thị icon 👑 cho host mới
+                        self.update_player_list_icons(new_host)
+                
+                elif update_type == "player_disconnected":
+                    username = data.get("username")
+                    game_started = data.get("game_started", False)
+                    new_host = data.get("new_host")
+                    
+                    if game_started:
+                        self.log.append(f"   ☠️ {username} disconnected (marked as dead)")
+                    else:
+                        self.log.append(f"   ⚠️ {username} disconnected")
+                        for i in range(self.player_list.count()):
+                            if username in self.player_list.item(i).text():
+                                self.player_list.takeItem(i)
+                                break
+                        
+                        # Xử lý host mới khi disconnect
+                        if new_host:
+                            self.log.append(f"   👑 {new_host} is now the host")
+                            if new_host == self.username:
+                                self.is_host = True
+                                self.btn_start_game.setEnabled(True)
+                                self.room_info_label.setText(
+                                    f"{self.room_info_label.text().split(' -')[0]} - You are HOST"
+                                )
+                                self.log.append("   ✓ You are now the host!")
+                            self.update_player_list_icons(new_host)
 
             elif header == 209:  # LEAVE_ROOM_RES
                 self.log.append(f"← LEAVE ROOM RESPONSE:")
@@ -382,6 +429,32 @@ class RoomClient(QtWidgets.QWidget):
 
         except json.JSONDecodeError:
             self.log.append(f"← Raw response (header={header}): {payload_str}")
+
+    def update_player_list_icons(self, new_host_username):
+        """Cập nhật icon 👑 cho host mới trong player list"""
+        for i in range(self.player_list.count()):
+            item = self.player_list.item(i)
+            text = item.text()
+            
+            # Xóa icon 👑 cũ
+            if text.startswith("👑"):
+                text = text.replace("👑", "👤", 1)
+            
+            # Lấy username từ text (bỏ các suffix như "(You)", "(Host)")
+            username = text.split("(")[0].replace("👤", "").strip()
+            
+            # Thêm icon 👑 cho host mới
+            if username == new_host_username:
+                if "(You)" in text:
+                    text = f"👑 {username} (You, Host)"
+                else:
+                    text = f"👑 {username} (Host)"
+            elif "(You)" in text:
+                text = f"👤 {username} (You)"
+            else:
+                text = f"👤 {username}"
+            
+            item.setText(text)
 
     def update_room_table(self, rooms):
         self.room_table.setRowCount(len(rooms))
