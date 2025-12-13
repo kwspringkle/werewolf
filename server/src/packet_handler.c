@@ -34,7 +34,18 @@ void send_packet(int client_fd, uint16_t header, const char *payload) {
 }
 
 void handle_ping(int client_fd, cJSON *json) {
-    (void)json;
+
+    Session *session = find_session(client_fd);
+    if (session) {
+        session->last_ping = time(NULL);
+    }
+    
+    cJSON *type = cJSON_GetObjectItem(json, "type");
+    if (type && cJSON_IsString(type) && strcmp(type->valuestring, "ping") == 0) {
+        // It's a ping packet, respond with pong
+        return;
+    }
+    
     cJSON *pong = cJSON_CreateObject();
     cJSON_AddStringToObject(pong, "type", "pong");
     char *pong_str = cJSON_PrintUnformatted(pong);

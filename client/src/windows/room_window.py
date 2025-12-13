@@ -5,6 +5,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from utils.image_utils import set_window_icon
 from components.user_header import UserHeader
 from windows.role_card_window import RoleCardWindow
+from utils.connection_monitor import ConnectionMonitor
 
 
 class RoomWindow(QtWidgets.QWidget):    
@@ -21,13 +22,16 @@ class RoomWindow(QtWidgets.QWidget):
         self.is_host = False
         self.current_player_count = 0
         self.current_host = None  # Lưu host hiện tại
-        
+
         self.setObjectName("room_window")
         self.setup_ui()
-        
+
         # Timer
         self.recv_timer = QtCore.QTimer()
         self.recv_timer.timeout.connect(self.receive_packets)
+
+        # Connection monitor
+        self.connection_monitor = None
         
     def setup_ui(self):
         """Thiết lập giao diện người dùng"""
@@ -150,24 +154,37 @@ class RoomWindow(QtWidgets.QWidget):
         # Set username in header
         if username:
             self.user_header.set_username(username)
-        
+
         # Show and enable start button only for host
         self.start_game_button.setVisible(self.is_host)
         if self.is_host:
             self.start_game_button.setEnabled(False)  # Will be enabled when enough players
-        
+
         # Load players
         self.update_player_list(players, username)
         self.current_player_count = len(players)
         self.update_player_count_ui()
-        
+
         # Start receiving
         self.recv_timer.start(100)
+
+        # Setup connection monitor
+        if not self.connection_monitor:
+            self.connection_monitor = ConnectionMonitor(
+                self.network_client,
+                self.toast_manager,
+                self.window_manager
+            )
+            self.connection_monitor.connection_lost.connect(self.on_connection_lost)
+            self.connection_monitor.connection_restored.connect(self.on_connection_restored)
+        self.connection_monitor.start()
         
     def hideEvent(self, event):
         """Called when window is hidden"""
         super().hideEvent(event)
         self.recv_timer.stop()
+        if self.connection_monitor:
+            self.connection_monitor.stop()
         
     def update_player_list(self, players, current_username):
         """Cập nhật widget danh sách người chơi"""
@@ -296,19 +313,43 @@ class RoomWindow(QtWidgets.QWidget):
         """Nhận gói tin từ server"""
         try:
             header, payload = self.network_client.receive_packet()
-            
+
             if header is None:
                 return
-                
+
             self.handle_packet(header, payload)
-            
+
+        except ConnectionError as e:
+            # Connection lost detected
+            print(f"[DEBUG] Connection lost: {e}")
+            self.recv_timer.stop()
+
+            # Trigger connection lost handling via monitor
+            if self.connection_monitor:
+                self.connection_monitor.is_connected = False
+                self.connection_monitor.stop()
+                self.connection_monitor.handle_connection_lost()
+
         except Exception as e:
-            self.toast_manager.error(f"Receive error: {str(e)}")
+            # Other errors - just show toast
+            error_msg = str(e)
+            print(f"[DEBUG] Other error: {error_msg}")
+            self.toast_manager.error(f"Receive error: {error_msg}")
             
     def handle_packet(self, header, payload):
         """Xử lý gói tin nhận được"""
+        # Handle PING from server
+        if header == 501:  # PING
+            try:
+                self.network_client.send_packet(501, {"type": "pong"})
+                if self.connection_monitor:
+                    self.connection_monitor.on_pong_received()
+            except:
+                pass
+            return
+
         username = self.window_manager.get_shared_data("username")
-        
+
         if header == 207:  # ROOM_STATUS_UPDATE
             update_type = payload.get("type")
             
@@ -468,7 +509,27 @@ class RoomWindow(QtWidgets.QWidget):
             else:
                 msg = payload.get("message", "Unknown error")
                 self.toast_manager.error(f"Failed to start game: {msg}")
-    
+
+    def on_connection_lost(self):
+        """Handle connection lost"""
+        self.recv_timer.stop()
+
+    def on_connection_restored(self):
+        """Handle connection restored after reconnect"""
+        print("[DEBUG] Room: Connection restored, navigating to login")
+        # Stop timer
+        self.recv_timer.stop()
+
+        # Clear session and room data
+        self.window_manager.set_shared_data("user_id", None)
+        self.window_manager.set_shared_data("username", None)
+        self.window_manager.set_shared_data("current_room_id", None)
+        self.window_manager.set_shared_data("current_room_name", None)
+        self.window_manager.set_shared_data("is_host", False)
+
+        # Navigate to login screen
+        self.window_manager.navigate_to("login")
+
     def on_logout(self):
         """Handle logout button click"""
         reply = QtWidgets.QMessageBox.question(
