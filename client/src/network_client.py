@@ -133,22 +133,26 @@ class WerewolfNetworkClient:
         """
         Nhận gói tin từ server (không chặn)
         Trả về: (header, payload_dict) hoặc (None, None) nếu không có dữ liệu
+        Raises: ConnectionError nếu server disconnect
         """
         if not self.client:
             raise RuntimeError("Client not created")
-            
+
         header = ctypes.c_ushort()
         payload_buffer = ctypes.create_string_buffer(8192)
-        
+
         result = self.lib.ww_client_receive(
             self.client,
             ctypes.byref(header),
             payload_buffer,
             8192
         )
-        
+
         if result < 0:
             error = self.get_error()
+            # Detect connection lost - raise ConnectionError instead of RuntimeError
+            if "closed" in error.lower() or "connection" in error.lower():
+                raise ConnectionError(f"Server connection lost: {error}")
             raise RuntimeError(f"Receive failed: {error}")
         elif result == 0:
             return None, None  # No data available
@@ -159,7 +163,7 @@ class WerewolfNetworkClient:
                 payload_dict = json.loads(payload_str) if payload_str else {}
             except json.JSONDecodeError:
                 payload_dict = {"raw": payload_str}
-                
+
             return header.value, payload_dict
             
     def disconnect(self):

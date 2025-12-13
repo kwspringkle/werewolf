@@ -2,9 +2,10 @@ from PyQt5 import QtWidgets, QtCore
 import sys
 from pathlib import Path
 
-# Thêm utils 
+# Thêm utils
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from utils.image_utils import create_logo_label
+from utils.connection_monitor import ConnectionMonitor
 
 
 class LoginWindow(QtWidgets.QWidget):
@@ -15,13 +16,16 @@ class LoginWindow(QtWidgets.QWidget):
         self.toast_manager = toast_manager
         self.window_manager = window_manager
         self.network_client = None
-        
+
         self.setObjectName("login_window")
         self.setup_ui()
-        
+
         # Receive timer
         self.recv_timer = QtCore.QTimer()
         self.recv_timer.timeout.connect(self.receive_packets)
+
+        # Connection monitor
+        self.connection_monitor = None
         
     def showEvent(self, event):
         """Called when window is shown"""
@@ -30,9 +34,21 @@ class LoginWindow(QtWidgets.QWidget):
         self.network_client = self.window_manager.get_shared_data("network_client")
         if self.network_client:
             self.recv_timer.start(100)
-        
+
         # Set focus to username input
         QtCore.QTimer.singleShot(100, lambda: self.username_input.setFocus())
+
+        # Setup connection monitor
+        if not self.connection_monitor and self.network_client:
+            self.connection_monitor = ConnectionMonitor(
+                self.network_client,
+                self.toast_manager,
+                self.window_manager
+            )
+            self.connection_monitor.connection_lost.connect(self.on_connection_lost)
+            self.connection_monitor.connection_restored.connect(self.on_connection_restored)
+        if self.connection_monitor:
+            self.connection_monitor.start()
         
     def setup_ui(self):
         """Thiết lập giao diện người dùng"""
@@ -98,9 +114,15 @@ class LoginWindow(QtWidgets.QWidget):
         self.back_button.clicked.connect(self.on_back)
         self.password_input.returnPressed.connect(self.on_login)
         
+    def hideEvent(self, event):
+        """Called when window is hidden"""
+        super().hideEvent(event)
+        self.recv_timer.stop()
+        if self.connection_monitor:
+            self.connection_monitor.stop()
+
     def on_back(self):
         """Quay lại cửa sổ chào mừng"""
-        self.recv_timer.stop()
         self.window_manager.navigate_to("welcome")
             
     def on_login(self):
@@ -123,18 +145,42 @@ class LoginWindow(QtWidgets.QWidget):
         """Nhận gói tin từ server"""
         try:
             header, payload = self.network_client.receive_packet()
-            
+
             if header is None:
                 return  # No data
-                
+
             self.handle_packet(header, payload)
-            
+
+        except ConnectionError as e:
+            # Connection lost detected
+            print(f"[DEBUG] Connection lost: {e}")
+            self.recv_timer.stop()
+
+            # Trigger connection lost handling via monitor
+            if self.connection_monitor:
+                self.connection_monitor.is_connected = False
+                self.connection_monitor.stop()
+                self.connection_monitor.handle_connection_lost()
+
         except Exception as e:
-            self.toast_manager.error(f"Receive error: {str(e)}")
+            # Other errors
+            error_msg = str(e)
+            print(f"[DEBUG] Other error: {error_msg}")
+            self.toast_manager.error(f"Receive error: {error_msg}")
             self.recv_timer.stop()
             
     def handle_packet(self, header, payload):
         """Xử lý gói tin nhận được"""
+        # Handle PING from server
+        if header == 501:  # PING
+            try:
+                self.network_client.send_packet(501, {"type": "pong"})
+                if self.connection_monitor:
+                    self.connection_monitor.on_pong_received()
+            except:
+                pass
+            return
+
         if header == 102:  # LOGIN_RES
             if payload.get("status") == "success":
                 user_id = payload.get("user_id")
@@ -154,8 +200,21 @@ class LoginWindow(QtWidgets.QWidget):
             else:
                 msg = payload.get("message", "Unknown error")
                 self.toast_manager.error(f"Login failed: {msg}")
-                
+
+    def on_connection_lost(self):
+        """Handle connection lost"""
+        self.recv_timer.stop()
+
+    def on_connection_restored(self):
+        """Handle connection restored after reconnect"""
+        print("[DEBUG] Login: Connection restored, restarting timer")
+        # Restart timer
+        if not self.recv_timer.isActive():
+            self.recv_timer.start(100)
+
     def closeEvent(self, event):
         """Xử lý khi đóng cửa sổ"""
         self.recv_timer.stop()
+        if self.connection_monitor:
+            self.connection_monitor.stop()
         event.accept()
