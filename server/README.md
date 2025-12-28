@@ -109,6 +109,46 @@ SERVER RUNNING ON PORT 5000...
 
 ---
 
+## 🎮 Chạy Client
+
+### Yêu Cầu
+- **Python 3.8+**
+- **PyQt5** (GUI framework)
+
+### Cài Đặt Dependencies
+
+```bash
+# Di chuyển vào thư mục client
+cd client
+
+# Cài đặt dependencies
+pip install PyQt5
+```
+
+### Chạy Client
+
+```bash
+# Từ thư mục client
+python main.py
+
+# Hoặc từ thư mục gốc project
+python client/main.py
+```
+
+### Kết Nối
+- Client mặc định kết nối đến `localhost:5000`
+- Đảm bảo server đã chạy trước khi khởi động client
+- Nhập địa chỉ server và port trong màn hình Welcome nếu server chạy ở địa chỉ khác
+
+### Flow Game
+1. **Welcome Screen**: Nhập server host và port → Connect
+2. **Login/Register**: Đăng nhập hoặc tạo tài khoản mới
+3. **Lobby**: Xem danh sách phòng hoặc tạo phòng mới
+4. **Room**: Chờ đủ người chơi (tối thiểu 6 người) → Host bấm Start Game
+5. **Game**: Nhận role và bắt đầu chơi
+
+---
+
 ## 📁 Cấu Trúc Project
 
 ```

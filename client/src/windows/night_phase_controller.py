@@ -6,6 +6,7 @@ from .roles.seer.seer_wait_window import SeerWaitWindow
 from .roles.guard.guard_select_window import GuardSelectWindow
 from .roles.guard.guard_wait_window import GuardWaitWindow
 from .roles.wolf.wolf_phase_controller import WolfPhaseController
+from .roles.wolf.wolf_wait_window import WolfWaitWindow
 
 
 class NightPhaseController:
@@ -242,7 +243,16 @@ class NightPhaseController:
             self.wolf_controller.activateWindow()
             QtCore.QTimer.singleShot(100, lambda: self.wolf_controller.activateWindow())
         else:
-            print("[DEBUG] User is not wolf - showing wait window")
-            # Non-wolf players sẽ thấy wait window (có thể tạo WolfWaitWindow tương tự)
-            # Hoặc chỉ đợi wolf phase kết thúc
-            # Tạm thời không làm gì, có thể thêm WolfWaitWindow sau
+            print("[DEBUG] User is not wolf - showing WolfWaitWindow")
+            self.wolf_controller = WolfWaitWindow(self.wolf_duration)
+            self.wolf_controller.setWindowModality(QtCore.Qt.ApplicationModal)
+            # Center the window on screen
+            screen = QtWidgets.QApplication.desktop().screenGeometry()
+            window_geometry = self.wolf_controller.frameGeometry()
+            window_geometry.moveCenter(screen.center())
+            self.wolf_controller.move(window_geometry.topLeft())
+            self.wolf_controller.show()
+            self.wolf_controller.raise_()
+            self.wolf_controller.activateWindow()
+            QtCore.QTimer.singleShot(100, lambda: self.wolf_controller.activateWindow())
+            # Không tự động đóng - sẽ đợi server broadcast phase tiếp theo hoặc đóng khi nhận signal

@@ -78,18 +78,31 @@ class GuardSelectWindow(QtWidgets.QWidget):
             card_item = QtWidgets.QFrame()
             card_item.setObjectName("user_card")
             card_item.setFrameShape(QtWidgets.QFrame.StyledPanel)
-            card_item.setStyleSheet(f"""
-                QFrame#user_card {{
-                    background-color: {'#1a1a2e' if is_alive else '#333333'};
-                    border: 2px solid {'#43d9ad' if is_alive else '#555555'};
-                    border-radius: 10px;
-                }}
-            """)
+            
+            # Style khác nhau cho alive và dead players
+            if is_alive:
+                card_item.setStyleSheet("""
+                    QFrame#user_card {
+                        background-color: #1a1a2e;
+                        border: 2px solid #43d9ad;
+                        border-radius: 10px;
+                    }
+                """)
+            else:
+                card_item.setStyleSheet("""
+                    QFrame#user_card {
+                        background-color: #333333;
+                        border: 2px solid #555555;
+                        border-radius: 10px;
+                        opacity: 0.6;
+                    }
+                """)
 
             card_item_layout = QtWidgets.QVBoxLayout(card_item)
             card_item_layout.setSpacing(0)
             card_item_layout.setContentsMargins(5, 5, 5, 5)
 
+            # Icon: 💀 cho dead, 👤 cho alive
             icon_label = QtWidgets.QLabel("💀" if not is_alive else "👤")
             icon_label.setAlignment(QtCore.Qt.AlignCenter)
             icon_label.setStyleSheet("font-size: 32px; padding-top: 5px;")
@@ -100,16 +113,22 @@ class GuardSelectWindow(QtWidgets.QWidget):
             name_label.setStyleSheet(f"""
                 font-size: 11px;
                 font-weight: bold;
-                color: {'#bbbbbb' if not is_alive else '#eaeaea'};
+                color: {'#888888' if not is_alive else '#eaeaea'};
                 padding: 2px;
                 background-color: transparent;
             """)
             name_label.setWordWrap(True)
             card_item_layout.addWidget(name_label)
 
-            # Make card clickable
-            card_item.mousePressEvent = self._make_card_click(card_item, uname, is_alive)
-            card_item.setCursor(QtCore.Qt.PointingHandCursor)
+            # Chỉ make clickable nếu player còn sống
+            if is_alive:
+                card_item.mousePressEvent = self._make_card_click(card_item, uname, is_alive)
+                card_item.setCursor(QtCore.Qt.PointingHandCursor)
+            else:
+                # Dead player: không thể click, cursor mặc định
+                card_item.setCursor(QtCore.Qt.ForbiddenCursor)
+                # Disable card để không thể tương tác
+                card_item.setEnabled(False)
             
             self.user_cards.append((card_item, uname, is_alive))
             self.user_grid_layout.addWidget(card_item, row, col)
@@ -191,27 +210,28 @@ class GuardSelectWindow(QtWidgets.QWidget):
             if not is_alive:
                 return
             
+            # Guard có thể chọn chính mình (bảo vệ chính mình)
             # Bỏ chọn tất cả
             for c, _, alive in self.user_cards:
                 if alive:  # Only update style for alive players
                     c.setProperty("selected", False)
                     # Update style to show unselected
-                    c.setStyleSheet(f"""
-                        QFrame#user_card {{
+                    c.setStyleSheet("""
+                        QFrame#user_card {
                             background-color: #1a1a2e;
                             border: 2px solid #43d9ad;
                             border-radius: 10px;
-                        }}
+                        }
                     """)
             
             # Chọn card này
             card_item.setProperty("selected", True)
-            card_item.setStyleSheet(f"""
-                QFrame#user_card {{
+            card_item.setStyleSheet("""
+                QFrame#user_card {
                     background-color: #2a4a5e;
                     border: 3px solid #43d9ad;
                     border-radius: 10px;
-                }}
+                }
             """)
             self.selected_username = uname
             # Enable protect button

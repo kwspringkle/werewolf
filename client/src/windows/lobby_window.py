@@ -6,6 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from utils.image_utils import set_window_icon
 from components.user_header import UserHeader
+from utils.connection_monitor import ConnectionMonitor
 
 
 class LobbyWindow(QtWidgets.QWidget):
@@ -22,16 +23,19 @@ class LobbyWindow(QtWidgets.QWidget):
         self.toast_manager = toast_manager
         self.window_manager = window_manager
         self.network_client = None
-        
+
         self.setObjectName("lobby_window")
         self.setup_ui()
-        
+
         # Timers
         self.recv_timer = QtCore.QTimer()
         self.recv_timer.timeout.connect(self.receive_packets)
-        
+
         self.auto_refresh_timer = QtCore.QTimer()
         self.auto_refresh_timer.timeout.connect(self.on_refresh_rooms)
+
+        # Connection monitor
+        self.connection_monitor = None
         
     def setup_ui(self):
         """Set up giao diện người dùng"""
@@ -122,29 +126,42 @@ class LobbyWindow(QtWidgets.QWidget):
     def showEvent(self, event):
         """Called when window is shown"""
         super().showEvent(event)
-        
+
         # Lấy client và tên người dùng từ window manager
         self.network_client = self.window_manager.get_shared_data("network_client")
         username = self.window_manager.get_shared_data("username")
-        
+
         if username:
             self.welcome_label.setText(f"Welcome, {username}! 🎮")
             self.user_header.set_username(username)
-            
+
         # Bắt đầu nhận gói tin
         self.recv_timer.start(100)
-        
+
         # Lấy danh sách phòng ban đầu
         self.on_refresh_rooms()
-        
+
         # Bắt đầu tự động làm mới (mỗi 3 giây)
         self.auto_refresh_timer.start(3000)
+
+        # Setup connection monitor
+        if not self.connection_monitor:
+            self.connection_monitor = ConnectionMonitor(
+                self.network_client,
+                self.toast_manager,
+                self.window_manager
+            )
+            self.connection_monitor.connection_lost.connect(self.on_connection_lost)
+            self.connection_monitor.connection_restored.connect(self.on_connection_restored)
+        self.connection_monitor.start()
         
     def hideEvent(self, event):
         """Called when window is hidden"""
         super().hideEvent(event)
         self.recv_timer.stop()
         self.auto_refresh_timer.stop()
+        if self.connection_monitor:
+            self.connection_monitor.stop()
         
     def on_create_room(self):
         """Tạo phòng mới"""
@@ -180,10 +197,10 @@ class LobbyWindow(QtWidgets.QWidget):
         """Nhận gói tin từ server"""
         try:
             header, payload = self.network_client.receive_packet()
-            
+
             if header is None:
                 return
-                
+
             self.handle_packet(header, payload)
             
         except RuntimeError as e:
@@ -194,8 +211,22 @@ class LobbyWindow(QtWidgets.QWidget):
                 self.handle_server_disconnect()
             else:
                 self.toast_manager.error(f"Receive error: {error_msg}")
+        except ConnectionError as e:
+            # Connection lost detected
+            print(f"[DEBUG] Connection lost: {e}")
+            self.recv_timer.stop()
+            self.auto_refresh_timer.stop()
+
+            # Trigger connection lost handling via monitor
+            if self.connection_monitor:
+                self.connection_monitor.is_connected = False
+                self.connection_monitor.stop()
+                self.connection_monitor.handle_connection_lost()
         except Exception as e:
-            self.toast_manager.error(f"Receive error: {str(e)}")
+            # Other errors - just show toast
+            error_msg = str(e)
+            print(f"[DEBUG] Other error: {error_msg}")
+            self.toast_manager.error(f"Receive error: {error_msg}")
             
     def handle_server_disconnect(self):
         """Xử lý khi server disconnect"""
@@ -225,11 +256,15 @@ class LobbyWindow(QtWidgets.QWidget):
             
     def handle_packet(self, header, payload):
         """Xử lý gói tin nhận được"""
-        if header == 501:  # PING - Server gửi PING để kiểm tra connection
+        # Handle PING from server
+        if header == 501:  # PING
             try:
                 self.network_client.send_packet(502, {"type": "pong"})  # 502 = PONG
+                if self.connection_monitor:
+                    self.connection_monitor.on_pong_received()
             except Exception as e:
                 print(f"[ERROR] Failed to send PONG: {e}")
+            return
         elif header == 502:  # PONG - Server trả về PONG (không cần xử lý)
             pass
         elif header == 202:  # GET_ROOMS_RES
@@ -391,6 +426,25 @@ class LobbyWindow(QtWidgets.QWidget):
         
         return card
     
+    def on_connection_lost(self):
+        """Handle connection lost"""
+        self.recv_timer.stop()
+        self.auto_refresh_timer.stop()
+
+    def on_connection_restored(self):
+        """Handle connection restored after reconnect"""
+        print("[DEBUG] Lobby: Connection restored, navigating to login")
+        # Stop timers
+        self.recv_timer.stop()
+        self.auto_refresh_timer.stop()
+
+        # Clear session data
+        self.window_manager.set_shared_data("user_id", None)
+        self.window_manager.set_shared_data("username", None)
+
+        # Navigate to login screen
+        self.window_manager.navigate_to("login")
+
     def on_logout(self):
         """Handle logout button click"""
         reply = QtWidgets.QMessageBox.question(
@@ -400,26 +454,26 @@ class LobbyWindow(QtWidgets.QWidget):
             QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
             QtWidgets.QMessageBox.No
         )
-        
+
         if reply == QtWidgets.QMessageBox.Yes:
             try:
                 # Send logout request
                 self.network_client.send_packet(105, {})  # LOGOUT_REQ
                 self.toast_manager.info("Logging out...")
-                
+
                 # Stop timers
                 self.recv_timer.stop()
                 self.auto_refresh_timer.stop()
-                
+
                 # Clear shared data
                 self.window_manager.set_shared_data("user_id", None)
                 self.window_manager.set_shared_data("username", None)
-                
+
                 # Disconnect from server
                 self.network_client.disconnect()
-                
+
                 # Navigate to welcome
                 self.window_manager.navigate_to("welcome")
-                
+
             except Exception as e:
                 self.toast_manager.error(f"Logout error: {str(e)}")

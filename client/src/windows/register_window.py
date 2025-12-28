@@ -5,6 +5,7 @@ from pathlib import Path
 # Thêm utils vào đường dẫn
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from utils.image_utils import create_logo_label
+from utils.connection_monitor import ConnectionMonitor
 
 
 class RegisterWindow(QtWidgets.QWidget):
@@ -15,13 +16,16 @@ class RegisterWindow(QtWidgets.QWidget):
         self.toast_manager = toast_manager
         self.window_manager = window_manager
         self.network_client = None
-        
+
         self.setObjectName("register_window")
         self.setup_ui()
-        
+
         # Receive timer
         self.recv_timer = QtCore.QTimer()
         self.recv_timer.timeout.connect(self.receive_packets)
+
+        # Connection monitor
+        self.connection_monitor = None
         
     def showEvent(self, event):
         """Called when window is shown"""
@@ -34,9 +38,21 @@ class RegisterWindow(QtWidgets.QWidget):
             self.recv_timer.start(100)
         else:
             print("[ERROR] No network_client available!")
-        
+
         # Set focus to username input
         QtCore.QTimer.singleShot(100, lambda: self.username_input.setFocus())
+
+        # Setup connection monitor
+        if not self.connection_monitor and self.network_client:
+            self.connection_monitor = ConnectionMonitor(
+                self.network_client,
+                self.toast_manager,
+                self.window_manager
+            )
+            self.connection_monitor.connection_lost.connect(self.on_connection_lost)
+            self.connection_monitor.connection_restored.connect(self.on_connection_restored)
+        if self.connection_monitor:
+            self.connection_monitor.start()
         
     def setup_ui(self):
         """Thiết lập giao diện người dùng"""
@@ -147,19 +163,25 @@ class RegisterWindow(QtWidgets.QWidget):
             print(f"[ERROR] Register send failed: {e}")
             self.toast_manager.error(f"Failed to send registration: {str(e)}")
             
+    def hideEvent(self, event):
+        """Called when window is hidden"""
+        super().hideEvent(event)
+        self.recv_timer.stop()
+        if self.connection_monitor:
+            self.connection_monitor.stop()
+
     def on_back(self):
         """Quay lại cửa sổ chào mừng"""
-        self.recv_timer.stop()
         self.window_manager.navigate_to("welcome")
             
     def receive_packets(self):
         """Nhận gói tin từ server"""
         try:
             header, payload = self.network_client.receive_packet()
-            
+
             if header is None:
                 return  # No data
-            
+
             print(f"[DEBUG] Register window received packet: header={header}, payload={payload}")
             self.handle_packet(header, payload)
             
@@ -173,9 +195,21 @@ class RegisterWindow(QtWidgets.QWidget):
             else:
                 self.toast_manager.error(f"Receive error: {error_msg}")
                 self.recv_timer.stop()
+        except ConnectionError as e:
+            # Connection lost detected
+            print(f"[DEBUG] Connection lost: {e}")
+            self.recv_timer.stop()
+
+            # Trigger connection lost handling via monitor
+            if self.connection_monitor:
+                self.connection_monitor.is_connected = False
+                self.connection_monitor.stop()
+                self.connection_monitor.handle_connection_lost()
         except Exception as e:
-            print(f"[ERROR] Receive error in register window: {e}")
-            self.toast_manager.error(f"Receive error: {str(e)}")
+            # Other errors
+            error_msg = str(e)
+            print(f"[ERROR] Receive error in register window: {error_msg}")
+            self.toast_manager.error(f"Receive error: {error_msg}")
             self.recv_timer.stop()
             
     def handle_server_disconnect(self):
@@ -204,11 +238,15 @@ class RegisterWindow(QtWidgets.QWidget):
     def handle_packet(self, header, payload):
         """Xử lý gói tin nhận được"""
         print(f"[DEBUG] Register handle_packet: header={header}, payload={payload}")
-        if header == 501:  # PING - Server gửi PING để kiểm tra connection
+        # Handle PING from server
+        if header == 501:  # PING
             try:
                 self.network_client.send_packet(502, {"type": "pong"})  # 502 = PONG
+                if self.connection_monitor:
+                    self.connection_monitor.on_pong_received()
             except Exception as e:
                 print(f"[ERROR] Failed to send PONG: {e}")
+            return
         elif header == 502:  # PONG - Server trả về PONG (không cần xử lý)
             pass
         elif header == 104:  # REGISTER_RES
@@ -232,8 +270,21 @@ class RegisterWindow(QtWidgets.QWidget):
                 self.toast_manager.error(f"Registration failed: {msg}")
         else:
             print(f"[WARNING] Unexpected packet in register window: {header}")
-                
+
+    def on_connection_lost(self):
+        """Handle connection lost"""
+        self.recv_timer.stop()
+
+    def on_connection_restored(self):
+        """Handle connection restored after reconnect"""
+        print("[DEBUG] Register: Connection restored, restarting timer")
+        # Restart timer
+        if not self.recv_timer.isActive():
+            self.recv_timer.start(100)
+
     def closeEvent(self, event):
         """Xử lý khi đóng cửa sổ"""
         self.recv_timer.stop()
+        if self.connection_monitor:
+            self.connection_monitor.stop()
         event.accept()

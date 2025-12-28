@@ -36,14 +36,21 @@ void send_packet(int client_fd, uint16_t header, const char *payload) {
 }
 
 void handle_ping(int client_fd, cJSON *json) {
+<<<<<<< HEAD
     // Client gửi PING (để ping server), server trả về PONG
     // Trong game này server gửi PING để check client, nên hàm này ít dùng
-    (void)json;
     Session *session = find_session(client_fd);
     if (session) {
         // Cập nhật last_ping khi nhận được ping từ client (client đang active)
         session->last_ping = time(NULL);
         printf("[SERVER] Received PING from client %d (user: %s)\n", client_fd, session->username);
+    }
+    
+    // Check if it's a ping packet (client sends ping to check server)
+    cJSON *type = cJSON_GetObjectItem(json, "type");
+    if (type && cJSON_IsString(type) && strcmp(type->valuestring, "ping") == 0) {
+        // It's a ping packet, respond with pong
+        return;
     }
     
     cJSON *pong = cJSON_CreateObject();
