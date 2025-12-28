@@ -4,7 +4,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from utils.image_utils import set_window_icon
 from components.user_header import UserHeader
-from windows.role_card_window import RoleCardWindow
+from .role_card_window import RoleCardWindow
+from .night_begin_window import NightBeginWindow
+
+
 
 
 class RoomWindow(QtWidgets.QWidget):    
@@ -308,6 +311,23 @@ class RoomWindow(QtWidgets.QWidget):
     def handle_packet(self, header, payload):
         """Xử lý gói tin nhận được"""
         username = self.window_manager.get_shared_data("username")
+
+        # Guard protect response - this shouldn't trigger night phase start
+        # Night phase should start from PHASE_NIGHT (303) packet
+        if header == 407:  # GUARD_PROTECT_REQ (this is wrong - 407 is request, should be response)
+            # Actually this seems wrong - 407 is GUARD_PROTECT_REQ from protocol.h
+            # This handler should probably be removed or handle something else
+            pass
+
+        if header == 408:  # GUARD_PROTECT_RES
+            # Optionally handle guard result/confirmation here (e.g., show toast)
+            status = payload.get("status")
+            if status == "success":
+                self.toast_manager.success("Guard action sent!")
+            else:
+                msg = payload.get("message", "Guard action failed")
+                self.toast_manager.warning(msg)
+            return
         
         if header == 207:  # ROOM_STATUS_UPDATE
             update_type = payload.get("type")
@@ -457,17 +477,69 @@ class RoomWindow(QtWidgets.QWidget):
                 self.start_game_button.setEnabled(False)
                 self.leave_room_button.setEnabled(False)
                 
+                # Save role info for later (used during night)
+                self.window_manager.set_shared_data("role_info", payload)
+
                 # Show role card dialog (modal, 30s timer)
-                role_card = RoleCardWindow(payload, self)
+                # Role card window will send ROLE_CARD_DONE_REQ when closed
+                from .role_card_window import RoleCardWindow
+                role_card = RoleCardWindow(
+                    payload,
+                    network_client=self.network_client,
+                    room_id=self.window_manager.get_shared_data("current_room_id"),
+                    parent=self
+                )
                 role_card.exec_()  # Blocks until user closes or timer ends
-                
-                # After role card is closed
-                # TODO: Navigate to game window or start night phase
-                self.toast_manager.info("Night phase will begin...")
+                # Don't start night phase here - wait for PHASE_NIGHT from server
                 
             else:
                 msg = payload.get("message", "Unknown error")
                 self.toast_manager.error(f"Failed to start game: {msg}")
+
+        elif header == 303:  # PHASE_NIGHT
+            # payload may contain duration
+            duration = payload.get("duration", 30)
+            # Hide room window and show NightBeginWindow
+            self.hide()
+            from .night_begin_window import NightBeginWindow
+            night_window = NightBeginWindow(duration, parent=self.window_manager.get_main_window())
+            # Khi night_window đóng, tự động chuyển sang night phase controller
+            def on_night_begin_closed():
+                # Lấy lại các thông tin cần thiết
+                role_info = self.window_manager.get_shared_data("role_info", {})
+                # Server sends role as number: 0=VILLAGER, 1=WEREWOLF, 2=SEER, 3=GUARD
+                role_num = role_info.get("role", 0)
+                is_seer = (role_num == 2)
+                is_guard = (role_num == 3)
+                is_wolf = (role_num == 1)
+                players = self.window_manager.get_shared_data("room_players", [])
+                my_username = self.window_manager.get_shared_data("username")
+                room_id = self.window_manager.get_shared_data("current_room_id")
+                # Get wolf usernames from werewolf team if available, otherwise check role
+                wolf_usernames = role_info.get("werewolf_team", [])
+                if not wolf_usernames:
+                    # Fallback: check role in players list (though this might not work if role not exposed)
+                    wolf_usernames = [p["username"] for p in players if p.get("role") == 1]
+                from .night_phase_controller import NightPhaseController
+                night_ctrl = NightPhaseController(
+                    self.window_manager, self.network_client, players, my_username, room_id,
+                    is_seer, is_guard, is_wolf, wolf_usernames, duration
+                )
+                night_ctrl.start()
+            night_window.destroyed.connect(on_night_begin_closed)
+            night_window.show()
+
+        elif header == 406:  # SEER_RESULT
+            # Only the seer will receive this normally
+            status = payload.get("status")
+            if status == "success":
+                target = payload.get("target_username")
+                is_wolf = bool(payload.get("is_werewolf"))
+                dlg = SeerResultDialog(target, is_wolf, parent=self)
+                dlg.exec_()
+            else:
+                msg = payload.get("message", "Seer check failed")
+                self.toast_manager.warning(msg)
     
     def on_logout(self):
         """Handle logout button click"""

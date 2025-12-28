@@ -10,6 +10,7 @@
 #include "session_manager.h"
 #include "room_manager.h"
 #include "role_manager.h"
+#include "role_handlers/seer_handler.h"
 #include "cJSON.h"
 
 void send_packet(int client_fd, uint16_t header, const char *payload) {
@@ -681,6 +682,7 @@ void handle_get_room_info(int client_fd, cJSON *json) {
     cJSON_Delete(response);
 }
 
+// Bắt đầu game
 void handle_start_game(int client_fd, cJSON *json) {
     cJSON *response = cJSON_CreateObject();
 
@@ -756,7 +758,7 @@ void handle_start_game(int client_fd, cJSON *json) {
 
     rooms[room_index].status = ROOM_PLAYING;
 
-    // Calculate role distribution
+    // Tính role distribution
     int num_players = rooms[room_index].current_players;
     int num_werewolves, num_seer, num_guard, num_villagers;
     
@@ -775,15 +777,15 @@ void handle_start_game(int client_fd, cJSON *json) {
     int roles[MAX_PLAYERS_PER_ROOM];
     int role_index = 0;
     
-    // Add werewolves
+    // Lưu lại sói
     for (int i = 0; i < num_werewolves; i++) {
         roles[role_index++] = ROLE_WEREWOLF;
     }
-    // Add seer
+    // Lưu lại tiên tri
     roles[role_index++] = ROLE_SEER;
-    // Add guard
+    // Lưu lại bảo vệ
     roles[role_index++] = ROLE_GUARD;
-    // Add villagers
+    // Lưu lại dân làng
     for (int i = 0; i < num_villagers; i++) {
         roles[role_index++] = ROLE_VILLAGER;
     }
@@ -797,22 +799,42 @@ void handle_start_game(int client_fd, cJSON *json) {
         roles[j] = temp;
     }
 
-    // Assign roles to all players
+    // Gán role 
     for (int i = 0; i < num_players; i++) {
         rooms[room_index].players[i].role = roles[i];
         rooms[room_index].players[i].is_alive = 1;
     }
 
-    // Send role info to all players
+    // Gửi role
     for (int i = 0; i < num_players; i++) {
         send_role_info_to_player(room_index, i);
     }
-
     cJSON_Delete(response);
 
-    printf("Game started in room %d with %d players (%d Werewolves, 1 Seer, 1 Guard, %d Villagers)\n",
-           room_id, rooms[room_index].current_players, num_werewolves, num_villagers);
+    // Đếm số người đã xong role card
+    rooms[room_index].role_card_done_count = 0;
+    rooms[room_index].role_card_total = num_players;
+    rooms[room_index].role_card_start_time = time(NULL);
+    // Chỉ bắt đầu night phase khi tất cả đã xong role card hoặc sau 30s
 }
+
+// Nhận ROLE_CARD_DONE_REQ từ client
+void handle_role_card_done(int client_fd, cJSON *json) {
+    (void)json; // unused for now
+    int room_index = get_user_room(client_fd);
+    if (room_index == -1) return;
+    
+    // Check if already started night phase
+    if (rooms[room_index].night_phase_active) return;
+    
+    rooms[room_index].role_card_done_count++;
+    if (rooms[room_index].role_card_done_count >= rooms[room_index].role_card_total) {
+        // Bắt đầu night phase cho cả phòng với duration 30s
+        start_night_phase(room_index, 30);
+    }
+}
+
+
 
 void process_packet(int client_fd, uint16_t header, const char *payload) {
     cJSON *json = cJSON_Parse(payload);
@@ -840,6 +862,15 @@ void process_packet(int client_fd, uint16_t header, const char *payload) {
         case START_GAME_REQ:
             handle_start_game(client_fd, json);
             break;
+        case SEER_CHECK_REQ:
+            seer_handle_packet(client_fd, json);
+            break;
+        case WOLF_KILL_REQ:
+            werewolf_handle_packet(client_fd, json);
+            break;
+        case GUARD_PROTECT_REQ:
+            guard_handle_packet(client_fd, json);
+            break;
         case LEAVE_ROOM_REQ:
             handle_leave_room(client_fd, json);
             break;
@@ -852,6 +883,9 @@ void process_packet(int client_fd, uint16_t header, const char *payload) {
         case PING:
             handle_ping(client_fd, json);
             break;
+            case 310: // ROLE_CARD_DONE_REQ (mới)
+                handle_role_card_done(client_fd, json);
+                break;
         default:
             printf("Unknown packet header: %d\n", header);
             break;

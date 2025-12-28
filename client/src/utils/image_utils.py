@@ -34,6 +34,7 @@ def create_logo_label(size=150):
     return None
 
 
+
 def create_icon_label(emoji_char, size=48):
     """
     Tạo label icon từ emoji
@@ -41,13 +42,25 @@ def create_icon_label(emoji_char, size=48):
     icon_label = QtWidgets.QLabel()
     icon_label.setAlignment(QtCore.Qt.AlignCenter)
     icon_label.setText(emoji_char)
-    
     font = QtGui.QFont()
     font.setFamily("Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji, Arial")
     font.setPointSize(size // 2)
     icon_label.setFont(font)
-    
     icon_label.setStyleSheet(f"font-size: {size}px;")
+    return icon_label
+
+def create_image_icon_label(image_filename, size=48):
+    """
+    Tạo label icon từ ảnh (png, jpg...)
+    """
+    image_path = get_image_path(image_filename)
+    icon_label = QtWidgets.QLabel()
+    icon_label.setAlignment(QtCore.Qt.AlignCenter)
+    if image_path.exists():
+        pixmap = QtGui.QPixmap(str(image_path))
+        if not pixmap.isNull():
+            scaled_pixmap = pixmap.scaled(size, size, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation)
+            icon_label.setPixmap(scaled_pixmap)
     return icon_label
 
 def set_window_icon(window, icon_name="werewolf_icon.png"):

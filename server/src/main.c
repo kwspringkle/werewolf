@@ -228,6 +228,7 @@ int main() {
         if (now - last_check >= 10) {
             send_ping_to_all_clients();
             check_timeouts();
+            check_role_card_timeouts();
             last_check = now;
         }
 

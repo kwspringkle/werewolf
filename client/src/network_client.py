@@ -11,6 +11,46 @@ from pathlib import Path
 
 
 class WerewolfNetworkClient:
+    def send_wolf_kill(self, room_id, target_username):
+        """Gửi yêu cầu sói cắn (wolf kill)"""
+        if not self.client:
+            raise RuntimeError("Client not created")
+        if not hasattr(self.lib, 'ww_client_wolf_kill_send'):
+            raise RuntimeError("C library missing wolf kill send")
+        if not isinstance(target_username, str):
+            raise ValueError("target_username must be a string")
+        result = self.lib.ww_client_wolf_kill_send(self.client, int(room_id), target_username.encode('utf-8'))
+        if result < 0:
+            error = self.get_error()
+            raise RuntimeError(f"Send wolf kill failed: {error}")
+        return result
+    def send_seer_check(self, room_id, target_username):
+        """Gửi yêu cầu tiên tri (seer check)"""
+        if not self.client:
+            raise RuntimeError("Client not created")
+        if not hasattr(self.lib, 'ww_client_seer_check_send'):
+            raise RuntimeError("C library missing seer check send")
+        if not isinstance(target_username, str):
+            raise ValueError("target_username must be a string")
+        result = self.lib.ww_client_seer_check_send(self.client, int(room_id), target_username.encode('utf-8'))
+        if result < 0:
+            error = self.get_error()
+            raise RuntimeError(f"Send seer check failed: {error}")
+        return result
+    def send_guard_protect(self, room_id, target_username):
+        """Gửi yêu cầu bảo vệ (guard protect)"""
+        if not self.client:
+            raise RuntimeError("Client not created")
+        if not hasattr(self.lib, 'ww_client_guard_protect_send'):
+            raise RuntimeError("C library missing guard protect send")
+        if not isinstance(target_username, str):
+            raise ValueError("target_username must be a string")
+        result = self.lib.ww_client_guard_protect_send(self.client, int(room_id), target_username.encode('utf-8'))
+        if result < 0:
+            error = self.get_error()
+            raise RuntimeError(f"Send guard protect failed: {error}")
+        return result
+
     """Python wrapper cho C Werewolf Network Client, sử dụng ctypes"""
     
     def __init__(self):
@@ -50,6 +90,11 @@ class WerewolfNetworkClient:
         self._define_functions()
         
     def _define_functions(self):
+        # ww_client_wolf_kill_send(client, room_id, target_username) -> int
+        if hasattr(self.lib, 'ww_client_wolf_kill_send'):
+            self.lib.ww_client_wolf_kill_send.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_char_p]
+            self.lib.ww_client_wolf_kill_send.restype = ctypes.c_int
+        
         """Định nghĩa chữ ký hàm C"""
         # ww_client_create() -> WerewolfClient*
         self.lib.ww_client_create.argtypes = []
@@ -91,6 +136,16 @@ class WerewolfNetworkClient:
         # ww_client_get_error(client) -> const char*
         self.lib.ww_client_get_error.argtypes = [ctypes.c_void_p]
         self.lib.ww_client_get_error.restype = ctypes.c_char_p
+
+        # ww_client_seer_check_send(client, room_id, target_username) -> int
+        if hasattr(self.lib, 'ww_client_seer_check_send'):
+            self.lib.ww_client_seer_check_send.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_char_p]
+            self.lib.ww_client_seer_check_send.restype = ctypes.c_int
+
+        # ww_client_guard_protect_send(client, room_id, target_username) -> int
+        if hasattr(self.lib, 'ww_client_guard_protect_send'):
+            self.lib.ww_client_guard_protect_send.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_char_p]
+            self.lib.ww_client_guard_protect_send.restype = ctypes.c_int
         
     def create(self):
         """Tạo instance client"""

@@ -2,17 +2,17 @@ from PyQt5 import QtWidgets, QtCore, QtGui
 class RoleCardWindow(QtWidgets.QDialog):
     """Window hiển thị role card với timer 30s"""
     
-    def __init__(self, role_data, parent=None):
+    def __init__(self, role_data, network_client=None, room_id=None, parent=None):
         super().__init__(parent)
         self.role_data = role_data
         self.remaining_time = 30
-        
+        self.network_client = network_client
+        self.room_id = room_id
         self.setObjectName("role_card_window")
         self.setModal(True)
         self.setWindowTitle("Your Role")
         self.setFixedSize(500, 600)
         self.setWindowFlags(QtCore.Qt.Dialog | QtCore.Qt.FramelessWindowHint)
-        
         self.setup_ui()
         self.start_timer()
         
@@ -195,7 +195,14 @@ class RoleCardWindow(QtWidgets.QDialog):
             self.accept()
             
     def closeEvent(self, event):
-        """Stop timer when closing"""
+        """Stop timer when closing and notify server"""
         if hasattr(self, 'countdown_timer'):
             self.countdown_timer.stop()
+        # Gửi ROLE_CARD_DONE_REQ lên server nếu có network_client
+        if self.network_client and self.room_id:
+            try:
+                # send_packet takes a dict, not a JSON string
+                self.network_client.send_packet(310, {"room_id": self.room_id})  # 310 = ROLE_CARD_DONE_REQ
+            except Exception as e:
+                print("Failed to notify server ROLE_CARD_DONE_REQ:", e)
         event.accept()

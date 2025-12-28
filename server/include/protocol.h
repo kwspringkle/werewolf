@@ -34,6 +34,7 @@ typedef enum {
     PHASE_NIGHT = 303,
     PHASE_DAY = 304,
     GAME_OVER = 305,
+    ROLE_CARD_DONE_REQ = 310,
 
     // Game actions (400-499)
     CHAT_REQ = 401,
