@@ -2,15 +2,25 @@ from PyQt5 import QtWidgets, QtCore
 
 class NightBeginWindow(QtWidgets.QWidget):
     """Night begin screen styled like RoleCardWindow, with countdown"""
-    def __init__(self, duration_seconds=10, parent=None):
-        super().__init__(parent)
-        self.duration = duration_seconds
-        self.remaining = duration_seconds
+    def __init__(self, toast_manager=None, window_manager=None):
+        super().__init__()
+        self.toast_manager = toast_manager
+        self.window_manager = window_manager
+        self.duration = 30
+        self.remaining = 30
+        self.timer = None
         self.setObjectName("night_begin_window")
         self.setWindowTitle("Night Begins")
-        self.setFixedSize(500, 600)
-        self.setWindowFlags(QtCore.Qt.Dialog | QtCore.Qt.FramelessWindowHint)
         self.setup_ui()
+        
+    def showEvent(self, event):
+        """Called when window is shown"""
+        super().showEvent(event)
+        # Lấy remaining_time từ shared data
+        remaining_time = self.window_manager.get_shared_data("night_begin_remaining_time", 30)
+        self.duration = remaining_time
+        self.remaining = remaining_time
+        self.timer_label.setText(f"⏱️ {self.remaining}s")
         self.start_timer()
 
     def setup_ui(self):
@@ -81,7 +91,9 @@ class NightBeginWindow(QtWidgets.QWidget):
             self.accept_or_close()
 
     def accept_or_close(self):
-        self.close()  # For QWidget, just close
+        # Không tự động đóng - sẽ đợi PHASE_NIGHT từ server
+        # Window này sẽ được đóng bởi room_window khi nhận PHASE_NIGHT
+        pass
 
     def closeEvent(self, event):
         if hasattr(self, 'timer'):

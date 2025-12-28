@@ -108,6 +108,10 @@ class SeerSelectWindow(QtWidgets.QWidget):
             name_label.setWordWrap(True)
             card_item_layout.addWidget(name_label)
 
+            # Make card clickable
+            card_item.mousePressEvent = self._make_card_click(card_item, uname)
+            card_item.setCursor(QtCore.Qt.PointingHandCursor)
+            
             self.user_cards.append((card_item, uname, is_alive))
             self.user_grid_layout.addWidget(card_item, row, col)
             col += 1
@@ -145,6 +149,7 @@ class SeerSelectWindow(QtWidgets.QWidget):
         
         self.select_btn = QtWidgets.QPushButton("Reveal")
         self.select_btn.setMinimumHeight(35)
+        self.select_btn.setEnabled(False)  # Disabled until player is selected
         self.select_btn.setStyleSheet("""
             QPushButton {
                 background-color: #e94560;
@@ -188,14 +193,36 @@ class SeerSelectWindow(QtWidgets.QWidget):
 
     def _make_card_click(self, card_item, uname):
         def handler(event):
+            # Only allow selection if player is alive
+            _, _, is_alive = next((c, u, a) for c, u, a in self.user_cards if u == uname)
+            if not is_alive:
+                return
+            
             # Bỏ chọn tất cả
             for c, _, alive in self.user_cards:
-                c.setProperty("selected", False)
-                c.setStyleSheet(c.styleSheet())
+                if alive:  # Only update style for alive players
+                    c.setProperty("selected", False)
+                    # Update style to show unselected
+                    c.setStyleSheet(f"""
+                        QFrame#user_card {{
+                            background-color: #1a1a2e;
+                            border: 2px solid #f39c12;
+                            border-radius: 10px;
+                        }}
+                    """)
+            
             # Chọn card này
             card_item.setProperty("selected", True)
-            card_item.setStyleSheet(card_item.styleSheet())
+            card_item.setStyleSheet(f"""
+                QFrame#user_card {{
+                    background-color: #2a3a4e;
+                    border: 3px solid #f39c12;
+                    border-radius: 10px;
+                }}
+            """)
             self.selected_username = uname
+            # Enable select button
+            self.select_btn.setEnabled(True)
         return handler
 
     def on_select(self):
@@ -203,17 +230,43 @@ class SeerSelectWindow(QtWidgets.QWidget):
         if not target:
             QtWidgets.QMessageBox.warning(self, "Select player", "Please select a player to reveal")
             return
+        
+        # Disable buttons to prevent multiple clicks
+        self.select_btn.setEnabled(False)
+        self.skip_btn.setEnabled(False)
+        
+        # Stop timer
+        if hasattr(self, 'timer'):
+            self.timer.stop()
+        
         if self.network_client and self.room_id is not None:
             try:
-                # Gửi yêu cầu đến server
-                # Ví dụ: self.network_client.send_seer_request(self.room_id, target)
-                pass
+                # Gửi SEER_CHECK_REQ (405) đến server
+                print(f"[DEBUG] Sending SEER_CHECK_REQ for target: {target}")
+                self.network_client.send_packet(405, {
+                    "room_id": self.room_id,
+                    "target_username": target
+                })
             except Exception as e:
-                print(f"Error sending seer request: {e}")
+                print(f"[ERROR] Error sending seer request: {e}")
                 QtWidgets.QMessageBox.warning(self, "Network", "Failed to send seer request")
-        self.close()
+                # Re-enable buttons on error
+                self.select_btn.setEnabled(True)
+                self.skip_btn.setEnabled(True)
+                if hasattr(self, 'timer'):
+                    self.timer.start(1000)
+        
+        # Don't close immediately - wait for SEER_RESULT (406) from server
+        # The window will be closed when result is received
 
     def on_skip(self):
+        # Stop timer
+        if hasattr(self, 'timer'):
+            self.timer.stop()
+        # Disable buttons
+        self.select_btn.setEnabled(False)
+        self.skip_btn.setEnabled(False)
+        # Close window - will trigger destroyed signal
         self.close()
 
     def closeEvent(self, event):

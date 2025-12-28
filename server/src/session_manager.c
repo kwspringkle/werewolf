@@ -62,13 +62,15 @@ void send_ping_to_all_clients(){
     for (int i = 0; i < MAX_SESSIONS; i++) {
         if (sessions[i].is_logged_in){
             if (now - sessions[i].last_ping >= 30) {
+                // Gửi PING để kiểm tra client còn sống không
                 cJSON *ping = cJSON_CreateObject();
                 cJSON_AddStringToObject(ping, "type", "ping");
                 char *ping_str = cJSON_PrintUnformatted(ping);
                 send_packet(sessions[i].socket, PING, ping_str);
                 free(ping_str);
                 cJSON_Delete(ping);
-                sessions[i].last_ping = now;
+                // Không cập nhật last_ping ở đây, chỉ cập nhật khi nhận được PONG
+                // Nếu không nhận được PONG trong 90s thì sẽ timeout
             }
         }
     }

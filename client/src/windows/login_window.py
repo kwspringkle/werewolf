@@ -126,16 +126,55 @@ class LoginWindow(QtWidgets.QWidget):
             
             if header is None:
                 return  # No data
-                
+            
             self.handle_packet(header, payload)
             
+        except RuntimeError as e:
+            error_msg = str(e)
+            # Kiểm tra xem có phải server disconnect không
+            if "Server closed" in error_msg or "Receive failed" in error_msg:
+                print(f"[ERROR] Server disconnected: {error_msg}")
+                self.handle_server_disconnect()
+            else:
+                self.toast_manager.error(f"Receive error: {error_msg}")
+                self.recv_timer.stop()
         except Exception as e:
             self.toast_manager.error(f"Receive error: {str(e)}")
             self.recv_timer.stop()
             
+    def handle_server_disconnect(self):
+        """Xử lý khi server disconnect"""
+        print("[DEBUG] Handling server disconnect...")
+        # Dừng receive timer
+        self.recv_timer.stop()
+        
+        # Hiển thị thông báo
+        self.toast_manager.error("⚠️ Server disconnected! Returning to welcome screen...")
+        
+        # Cleanup network client
+        try:
+            if self.network_client:
+                self.network_client.disconnect()
+                self.network_client.destroy()
+        except Exception as e:
+            print(f"[ERROR] Error during cleanup: {e}")
+        
+        # Clear shared data
+        self.window_manager.set_shared_data("network_client", None)
+        
+        # Navigate về welcome screen
+        self.window_manager.navigate_to("welcome")
+            
     def handle_packet(self, header, payload):
         """Xử lý gói tin nhận được"""
-        if header == 102:  # LOGIN_RES
+        if header == 501:  # PING - Server gửi PING để kiểm tra connection
+            try:
+                self.network_client.send_packet(502, {"type": "pong"})  # 502 = PONG
+            except Exception as e:
+                print(f"[ERROR] Failed to send PONG: {e}")
+        elif header == 502:  # PONG - Server trả về PONG (không cần xử lý)
+            pass
+        elif header == 102:  # LOGIN_RES
             if payload.get("status") == "success":
                 user_id = payload.get("user_id")
                 username = payload.get("username")

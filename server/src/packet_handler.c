@@ -11,6 +11,7 @@
 #include "room_manager.h"
 #include "role_manager.h"
 #include "role_handlers/seer_handler.h"
+#include "protocol.h"
 #include "cJSON.h"
 
 void send_packet(int client_fd, uint16_t header, const char *payload) {
@@ -35,15 +36,36 @@ void send_packet(int client_fd, uint16_t header, const char *payload) {
 }
 
 void handle_ping(int client_fd, cJSON *json) {
+    // Client gửi PING (để ping server), server trả về PONG
+    // Trong game này server gửi PING để check client, nên hàm này ít dùng
     (void)json;
+    Session *session = find_session(client_fd);
+    if (session) {
+        // Cập nhật last_ping khi nhận được ping từ client (client đang active)
+        session->last_ping = time(NULL);
+        printf("[SERVER] Received PING from client %d (user: %s)\n", client_fd, session->username);
+    }
+    
     cJSON *pong = cJSON_CreateObject();
     cJSON_AddStringToObject(pong, "type", "pong");
     char *pong_str = cJSON_PrintUnformatted(pong);
 
-    send_packet(client_fd, PING, pong_str);
+    send_packet(client_fd, PONG, pong_str);  // Gửi PONG với header PONG
 
     free(pong_str);
     cJSON_Delete(pong);
+}
+
+void handle_pong(int client_fd, cJSON *json) {
+    // Client trả về PONG sau khi nhận PING từ server
+    // Đây là cách server kiểm tra client còn sống không
+    (void)json;
+    Session *session = find_session(client_fd);
+    if (session) {
+        // Cập nhật last_ping khi nhận được pong từ client (client đang active)
+        session->last_ping = time(NULL);
+        printf("[SERVER] Received PONG from client %d (user: %s) - connection alive\n", client_fd, session->username);
+    }
 }
 
 void handle_register(int client_fd, cJSON *json){
@@ -822,15 +844,27 @@ void handle_start_game(int client_fd, cJSON *json) {
 void handle_role_card_done(int client_fd, cJSON *json) {
     (void)json; // unused for now
     int room_index = get_user_room(client_fd);
-    if (room_index == -1) return;
+    if (room_index == -1) {
+        printf("[SERVER] handle_role_card_done: client %d not in any room\n", client_fd);
+        return;
+    }
     
     // Check if already started night phase
-    if (rooms[room_index].night_phase_active) return;
+    if (rooms[room_index].night_phase_active) {
+        printf("[SERVER] handle_role_card_done: room %d already in night phase\n", rooms[room_index].id);
+        return;
+    }
     
     rooms[room_index].role_card_done_count++;
+    printf("[SERVER] Room %d: role_card_done_count = %d/%d\n", 
+           rooms[room_index].id, 
+           rooms[room_index].role_card_done_count, 
+           rooms[room_index].role_card_total);
+    
     if (rooms[room_index].role_card_done_count >= rooms[room_index].role_card_total) {
-        // Bắt đầu night phase cho cả phòng với duration 30s
-        start_night_phase(room_index, 30);
+        // Bắt đầu night phase cho cả phòng (duration sẽ được tính từ các phase duration)
+        printf("[SERVER] All players in room %d have finished role card, starting night phase\n", rooms[room_index].id);
+        start_night_phase(room_index, 0);  // Parameter không dùng nữa, nhưng giữ để backward compatible
     }
 }
 
@@ -880,12 +914,16 @@ void process_packet(int client_fd, uint16_t header, const char *payload) {
         case GET_ROOM_INFO_REQ:
             handle_get_room_info(client_fd, json);
             break;
-        case PING:
+        case PING:  // Client gửi PING (ít dùng, server thường gửi PING để check client)
             handle_ping(client_fd, json);
             break;
-            case 310: // ROLE_CARD_DONE_REQ (mới)
-                handle_role_card_done(client_fd, json);
-                break;
+        case PONG:  // Client trả về PONG sau khi nhận PING từ server
+            handle_pong(client_fd, json);
+            break;
+        case ROLE_CARD_DONE_REQ: // 310
+            printf("[SERVER] Received ROLE_CARD_DONE_REQ (310) from client %d\n", client_fd);
+            handle_role_card_done(client_fd, json);
+            break;
         default:
             printf("Unknown packet header: %d\n", header);
             break;
