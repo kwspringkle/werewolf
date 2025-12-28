@@ -11,6 +11,7 @@ class NightBeginWindow(QtWidgets.QWidget):
         self.timer = None
         self.setObjectName("night_begin_window")
         self.setWindowTitle("Night Begins")
+        self.setFixedSize(600, 500)  # Set fixed size để tránh window trắng
         self.setup_ui()
         
     def showEvent(self, event):

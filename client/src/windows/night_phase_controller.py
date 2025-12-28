@@ -41,6 +41,8 @@ class NightPhaseController:
     def start_seer_phase(self):
         if self.is_seer:
             print("[DEBUG] User is seer - creating and showing SeerSelectWindow")
+            print(f"[DEBUG] Seer select - players list: {[p.get('username', 'unknown') for p in self.players]}")
+            print(f"[DEBUG] Seer select - total players: {len(self.players)}")
             try:
                 self.seer_window = SeerSelectWindow(self.players, self.my_username, self.seer_duration, self.network_client, self.room_id)
                 self.seer_window.setWindowModality(QtCore.Qt.ApplicationModal)
@@ -180,6 +182,10 @@ class NightPhaseController:
         
         if self.is_guard:
             print("[DEBUG] User is guard - showing GuardSelectWindow")
+            print(f"[DEBUG] Guard select - players list: {[p.get('username', 'unknown') if isinstance(p, dict) else str(p) for p in self.players]}")
+            print(f"[DEBUG] Guard select - total players: {len(self.players)}")
+            print(f"[DEBUG] Guard select - full players data: {self.players}")
+            # Đảm bảo truyền TẤT CẢ players vào GuardSelectWindow, không filter
             self.guard_window = GuardSelectWindow(self.players, self.my_username, self.guard_duration, self.network_client, self.room_id)
             self.guard_window.setWindowModality(QtCore.Qt.ApplicationModal)
             # Center the window on screen
@@ -223,15 +229,72 @@ class NightPhaseController:
             self.guard_window.close()
             self.guard_window = None
         
-        player_list = [p['username'] for p in self.players if p['username'] != self.my_username]
-        alive_status = [p.get('is_alive', 1) for p in self.players if p['username'] != self.my_username]
+        # Filter: chỉ lấy những người KHÔNG phải sói và không phải chính mình
+        player_list = []
+        alive_status = []
+        for p in self.players:
+            username = p.get('username', '')
+            # Bỏ qua chính mình và những người trong wolf team
+            if username != self.my_username and username not in self.wolf_usernames:
+                player_list.append(username)
+                alive_status.append(p.get('is_alive', 1))
+        
+        print(f"[DEBUG] Wolf select - filtered players (non-wolves): {player_list}")
+        print(f"[DEBUG] Wolf select - alive status: {alive_status}")
+        
+        # Debug: Print detailed info about wolf detection
+        print(f"[DEBUG] Wolf phase check - is_wolf: {self.is_wolf}, my_username: {self.my_username}")
+        print(f"[DEBUG] Wolf usernames: {self.wolf_usernames}")
+        print(f"[DEBUG] All players: {[p.get('username') for p in self.players]}")
+        
+        # Double-check: if my_username is in wolf_usernames, then is_wolf should be True
+        if self.my_username in self.wolf_usernames:
+            if not self.is_wolf:
+                print(f"[WARNING] my_username {self.my_username} is in wolf_usernames but is_wolf is False! Fixing...")
+                self.is_wolf = True
         
         if self.is_wolf:
-            print("[DEBUG] User is wolf - showing WolfPhaseController")
-            self.wolf_controller = WolfPhaseController(
-                player_list, alive_status, self.my_username, self.wolf_usernames,
-                network_client=self.network_client, room_id=self.room_id, duration_seconds=self.wolf_duration
+            print("[DEBUG] User is wolf - showing WolfSelectWindow")
+            from .roles.wolf.wolf_select_window import WolfSelectWindow
+            from .roles.wolf.wolf_chat_window import WolfChatWindow
+            
+            # Tạo WolfSelectWindow trực tiếp
+            self.wolf_controller = WolfSelectWindow(
+                player_list, alive_status, self.my_username, 
+                duration_seconds=self.wolf_duration,
+                network_client=self.network_client, room_id=self.room_id
             )
+            
+            # Tạo chat window và connect button
+            self.wolf_chat_window = None
+            def show_chat():
+                if not self.wolf_chat_window:
+                    self.wolf_chat_window = WolfChatWindow(self.my_username, self.wolf_usernames)
+                    self.wolf_chat_window.setWindowModality(QtCore.Qt.ApplicationModal)
+                    # Center chat window
+                    screen = QtWidgets.QApplication.desktop().screenGeometry()
+                    window_geometry = self.wolf_chat_window.frameGeometry()
+                    window_geometry.moveCenter(screen.center())
+                    self.wolf_chat_window.move(window_geometry.topLeft())
+                    # Button để quay lại select window
+                    if hasattr(self.wolf_chat_window, 'switch_btn'):
+                        self.wolf_chat_window.switch_btn.clicked.connect(show_select)
+                self.wolf_controller.hide()
+                self.wolf_chat_window.show()
+                self.wolf_chat_window.raise_()
+                self.wolf_chat_window.activateWindow()
+            
+            def show_select():
+                if self.wolf_chat_window:
+                    self.wolf_chat_window.hide()
+                self.wolf_controller.show()
+                self.wolf_controller.raise_()
+                self.wolf_controller.activateWindow()
+            
+            # Connect chat button
+            if hasattr(self.wolf_controller, 'chat_btn'):
+                self.wolf_controller.chat_btn.clicked.connect(show_chat)
+            
             self.wolf_controller.setWindowModality(QtCore.Qt.ApplicationModal)
             # Center the window on screen
             screen = QtWidgets.QApplication.desktop().screenGeometry()

@@ -78,18 +78,31 @@ class WolfSelectWindow(QtWidgets.QDialog):
             card_item = QtWidgets.QFrame()
             card_item.setObjectName("user_card")
             card_item.setFrameShape(QtWidgets.QFrame.StyledPanel)
-            card_item.setStyleSheet(f"""
-                QFrame#user_card {{
-                    background-color: {'#1a1a2e' if is_alive else '#333333'};
-                    border: 2px solid {'#e94560' if is_alive else '#555555'};
-                    border-radius: 10px;
-                }}
-            """)
+            
+            # Style khác nhau cho alive và dead players (giống seer/guard)
+            if is_alive:
+                card_item.setStyleSheet("""
+                    QFrame#user_card {
+                        background-color: #1a1a2e;
+                        border: 2px solid #e94560;
+                        border-radius: 10px;
+                    }
+                """)
+            else:
+                card_item.setStyleSheet("""
+                    QFrame#user_card {
+                        background-color: #333333;
+                        border: 2px solid #555555;
+                        border-radius: 10px;
+                        opacity: 0.6;
+                    }
+                """)
 
             card_item_layout = QtWidgets.QVBoxLayout(card_item)
             card_item_layout.setSpacing(0)
             card_item_layout.setContentsMargins(5, 5, 5, 5)
 
+            # Icon: 💀 cho dead, 👤 cho alive
             icon_label = QtWidgets.QLabel("💀" if not is_alive else "👤")
             icon_label.setAlignment(QtCore.Qt.AlignCenter)
             icon_label.setStyleSheet("font-size: 32px; padding-top: 5px;")
@@ -100,12 +113,22 @@ class WolfSelectWindow(QtWidgets.QDialog):
             name_label.setStyleSheet(f"""
                 font-size: 11px;
                 font-weight: bold;
-                color: {'#bbbbbb' if not is_alive else '#eaeaea'};
+                color: {'#888888' if not is_alive else '#eaeaea'};
                 padding: 2px;
                 background-color: transparent;
             """)
             name_label.setWordWrap(True)
             card_item_layout.addWidget(name_label)
+
+            # Chỉ make clickable nếu player còn sống
+            if is_alive:
+                card_item.mousePressEvent = self._make_card_click(card_item, uname, is_alive)
+                card_item.setCursor(QtCore.Qt.PointingHandCursor)
+            else:
+                # Dead player: không thể click, cursor mặc định
+                card_item.setCursor(QtCore.Qt.ForbiddenCursor)
+                # Disable card để không thể tương tác
+                card_item.setEnabled(False)
 
             self.user_cards.append((card_item, uname, is_alive))
             self.user_grid_layout.addWidget(card_item, row, col)
@@ -144,6 +167,7 @@ class WolfSelectWindow(QtWidgets.QDialog):
 
         self.select_btn = QtWidgets.QPushButton("Bite")
         self.select_btn.setMinimumHeight(35)
+        self.select_btn.setEnabled(False)  # Disabled until player is selected
         self.select_btn.setStyleSheet("""
             QPushButton {
                 background-color: #e94560;
@@ -216,14 +240,37 @@ class WolfSelectWindow(QtWidgets.QDialog):
             self.timer.stop()
             self.on_skip()
 
-    def _make_card_click(self, card_item, uname):
+    def _make_card_click(self, card_item, uname, is_alive):
         def handler(event):
+            # Only allow selection if player is alive
+            if not is_alive:
+                return
+            
+            # Bỏ chọn tất cả
             for c, _, alive in self.user_cards:
-                c.setProperty("selected", False)
-                c.setStyleSheet(c.styleSheet())
+                if alive:  # Only update style for alive players
+                    c.setProperty("selected", False)
+                    # Update style to show unselected
+                    c.setStyleSheet("""
+                        QFrame#user_card {
+                            background-color: #1a1a2e;
+                            border: 2px solid #e94560;
+                            border-radius: 10px;
+                        }
+                    """)
+            
+            # Chọn card này
             card_item.setProperty("selected", True)
-            card_item.setStyleSheet(card_item.styleSheet())
+            card_item.setStyleSheet("""
+                QFrame#user_card {
+                    background-color: #3a1a2e;
+                    border: 3px solid #e94560;
+                    border-radius: 10px;
+                }
+            """)
             self.selected_username = uname
+            # Enable bite button
+            self.select_btn.setEnabled(True)
         return handler
 
     def get_selected_username(self):
@@ -234,11 +281,39 @@ class WolfSelectWindow(QtWidgets.QDialog):
         if not target:
             QtWidgets.QMessageBox.warning(self, "Select player", "Please select a player to bite")
             return
+        
+        # Kiểm tra target có còn sống không
+        target_index = -1
+        for i, uname in enumerate(self.player_list):
+            if uname == target:
+                target_index = i
+                break
+        
+        if target_index >= 0 and not self.alive_status[target_index]:
+            QtWidgets.QMessageBox.warning(self, "Invalid target", "Cannot bite a dead player")
+            return
+        
+        # Disable buttons to prevent multiple clicks
+        self.select_btn.setEnabled(False)
+        self.skip_btn.setEnabled(False)
+        
+        # Stop timer
+        if hasattr(self, 'timer'):
+            self.timer.stop()
+        
         if self.network_client and self.room_id is not None:
             try:
                 self.network_client.send_wolf_kill(self.room_id, target)
             except Exception as e:
                 QtWidgets.QMessageBox.warning(self, "Network", f"Failed to send wolf kill: {e}")
+                # Re-enable buttons on error
+                self.select_btn.setEnabled(True)
+                self.skip_btn.setEnabled(True)
+                if hasattr(self, 'timer'):
+                    self.timer.start(1000)
+                return
+        
+        # Close window - server sẽ xử lý tiếp
         self.close()
 
     def on_skip(self):

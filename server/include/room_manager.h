@@ -17,5 +17,7 @@ void check_role_card_timeouts();
 void check_seer_phase_timeout();
 // Check guard phase timeout and broadcast wolf phase start
 void check_guard_phase_timeout();
+// Check wolf phase timeout, process votes if any, and broadcast day phase start
+void check_wolf_phase_timeout();
 
 #endif

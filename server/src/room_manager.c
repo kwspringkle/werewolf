@@ -86,6 +86,17 @@ void start_night_phase(int room_index, int duration_seconds) {
     cJSON_AddNumberToObject(notif, "seer_duration", SEER_PHASE_DURATION);
     cJSON_AddNumberToObject(notif, "guard_duration", GUARD_PHASE_DURATION);
     cJSON_AddNumberToObject(notif, "wolf_duration", WOLF_PHASE_DURATION);
+    
+    // Thêm players list với đầy đủ thông tin (username, is_alive)
+    cJSON *players_array = cJSON_CreateArray();
+    for (int i = 0; i < rooms[room_index].current_players; i++) {
+        cJSON *player_obj = cJSON_CreateObject();
+        cJSON_AddStringToObject(player_obj, "username", rooms[room_index].players[i].username);
+        cJSON_AddNumberToObject(player_obj, "is_alive", rooms[room_index].players[i].is_alive);
+        cJSON_AddItemToArray(players_array, player_obj);
+    }
+    cJSON_AddItemToObject(notif, "players", players_array);
+    
     char *notif_str = cJSON_PrintUnformatted(notif);
     printf("[SERVER] Broadcasting PHASE_NIGHT (303) to %d players in room %d: %s\n", 
            rooms[room_index].current_players, rooms[room_index].id, notif_str);
@@ -203,6 +214,122 @@ void check_guard_phase_timeout() {
             broadcast_room(i, PHASE_WOLF_START, wolf_notif_str);
             free(wolf_notif_str);
             cJSON_Delete(wolf_notif);
+        }
+    }
+}
+
+void check_wolf_phase_timeout() {
+    time_t now = time(NULL);
+    
+    for (int i = 0; i < MAX_ROOMS; i++) {
+        if (rooms[i].id == 0) continue;
+        if (rooms[i].status != ROOM_PLAYING) continue;
+        if (!rooms[i].night_phase_active) continue; // Not in night phase
+        if (!rooms[i].seer_choice_made) continue; // Seer phase not finished yet
+        if (!rooms[i].guard_choice_made) continue; // Guard phase not finished yet
+        if (rooms[i].wolf_deadline == 0) continue; // No deadline set
+        
+        // Check if wolf deadline has passed
+        if (now >= rooms[i].wolf_deadline) {
+            printf("[SERVER] Wolf phase timeout for room %d\n", rooms[i].id);
+            
+            // Nếu chưa xử lý votes, xử lý votes hiện có (nếu có wolves đã vote)
+            if (!rooms[i].wolf_kill_done) {
+                int n = rooms[i].current_players;
+                
+                // Đếm số sói còn sống
+                int alive_wolves = 0;
+                for (int j = 0; j < n; j++) {
+                    if (rooms[i].players[j].role == ROLE_WEREWOLF && rooms[i].players[j].is_alive)
+                        alive_wolves++;
+                }
+                
+                // Đếm số sói đã vote
+                int wolf_vote_count = 0;
+                for (int j = 0; j < n; j++) {
+                    if (rooms[i].players[j].role == ROLE_WEREWOLF && rooms[i].players[j].is_alive && 
+                        strlen(rooms[i].wolf_votes[j]) > 0)
+                        wolf_vote_count++;
+                }
+                
+                // Nếu có ít nhất 1 sói đã vote, xử lý votes
+                if (wolf_vote_count > 0) {
+                    printf("[SERVER] Processing wolf votes: %d/%d wolves voted\n", wolf_vote_count, alive_wolves);
+                    
+                    // Đếm số vote cho từng username
+                    int vote_tally[MAX_PLAYERS_PER_ROOM] = {0};
+                    for (int j = 0; j < n; j++) {
+                        if (rooms[i].players[j].role == ROLE_WEREWOLF && rooms[i].players[j].is_alive) {
+                            char *voted_name = rooms[i].wolf_votes[j];
+                            if (strlen(voted_name) > 0) {
+                                for (int k = 0; k < n; k++) {
+                                    if (strcmp(rooms[i].players[k].username, voted_name) == 0) {
+                                        vote_tally[k]++;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Tìm người bị vote nhiều nhất
+                    int max_votes = 0, victim_index = -1;
+                    for (int j = 0; j < n; j++) {
+                        if (vote_tally[j] > max_votes) {
+                            max_votes = vote_tally[j];
+                            victim_index = j;
+                        }
+                    }
+                    
+                    // Kiểm tra hợp lệ và xử lý kill
+                    if (victim_index != -1 && max_votes > 0) {
+                        Player *victim = &rooms[i].players[victim_index];
+                        // Kiểm tra đã chết chưa
+                        if (victim->is_alive) {
+                            // Kiểm tra có được bảo vệ không
+                            if (strlen(rooms[i].guard_protected_username) > 0 &&
+                                strcmp(victim->username, rooms[i].guard_protected_username) == 0) {
+                                // Được bảo vệ, không chết
+                                printf("[SERVER] %s was protected by guard, survived the attack\n", victim->username);
+                            } else {
+                                // Không được bảo vệ, set chết
+                                victim->is_alive = 0;
+                                printf("[SERVER] %s was killed by wolves (votes: %d)\n", victim->username, max_votes);
+                            }
+                        }
+                    } else {
+                        printf("[SERVER] No valid victim from wolf votes\n");
+                    }
+                } else {
+                    printf("[SERVER] No wolves voted, no one is killed\n");
+                }
+                
+                rooms[i].wolf_kill_done = 1;
+            }
+            
+            // Kết thúc night phase và chuyển sang day phase
+            rooms[i].night_phase_active = 0;
+            
+            // Collect danh sách người chết (bao gồm cả disconnected users)
+            cJSON *dead_players = cJSON_CreateArray();
+            for (int j = 0; j < rooms[i].current_players; j++) {
+                if (!rooms[i].players[j].is_alive) {
+                    cJSON_AddItemToArray(dead_players, cJSON_CreateString(rooms[i].players[j].username));
+                    printf("[SERVER] Player %s is dead (included in death list)\n", rooms[i].players[j].username);
+                }
+            }
+            
+            // Broadcast day phase start to all players (KHÔNG disconnect/kick ai cả)
+            cJSON *day_notif = cJSON_CreateObject();
+            cJSON_AddStringToObject(day_notif, "type", "phase_day");
+            cJSON_AddStringToObject(day_notif, "message", "Night phase ended, day phase begins");
+            cJSON_AddItemToObject(day_notif, "dead_players", dead_players);
+            char *day_notif_str = cJSON_PrintUnformatted(day_notif);
+            printf("[SERVER] Broadcasting PHASE_DAY (304) to all players in room %d with %d dead players\n", 
+                   rooms[i].id, cJSON_GetArraySize(dead_players));
+            broadcast_room(i, PHASE_DAY, day_notif_str);
+            free(day_notif_str);
+            cJSON_Delete(day_notif);
         }
     }
 }

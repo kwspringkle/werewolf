@@ -231,6 +231,7 @@ int main() {
             check_role_card_timeouts();
             check_seer_phase_timeout();  // Check seer deadline
             check_guard_phase_timeout(); // Check guard deadline
+            check_wolf_phase_timeout();  // Check wolf deadline and process votes
             last_check = now;
         }
 

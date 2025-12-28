@@ -198,19 +198,48 @@ void werewolf_handle_packet(int client_fd, cJSON *json) {
                 if (strlen(rooms[room_index].guard_protected_username) > 0 &&
                     strcmp(victim->username, rooms[room_index].guard_protected_username) == 0) {
                     // Được bảo vệ, không chết
+                    printf("[SERVER] %s was protected by guard, survived the attack\n", victim->username);
                 } else {
                     // Không được bảo vệ, set chết
                     victim->is_alive = 0;
+                    printf("[SERVER] %s was killed by wolves (votes: %d)\n", victim->username, max_votes);
                 }
             }
+        } else {
+            printf("[SERVER] No valid victim from wolf votes (max_votes: %d)\n", max_votes);
         }
         rooms[room_index].wolf_kill_done = 1;
+        
+        // Kết thúc night phase và chuyển sang day phase
+        rooms[room_index].night_phase_active = 0;
+        
+        // Collect danh sách người chết (bao gồm cả disconnected users)
+        cJSON *dead_players = cJSON_CreateArray();
+        for (int j = 0; j < rooms[room_index].current_players; j++) {
+            if (!rooms[room_index].players[j].is_alive) {
+                cJSON_AddItemToArray(dead_players, cJSON_CreateString(rooms[room_index].players[j].username));
+                printf("[SERVER] Player %s is dead (included in death list)\n", rooms[room_index].players[j].username);
+            }
+        }
+        
+        // Broadcast day phase start to all players (KHÔNG disconnect/kick ai cả)
+        cJSON *day_notif = cJSON_CreateObject();
+        cJSON_AddStringToObject(day_notif, "type", "phase_day");
+        cJSON_AddStringToObject(day_notif, "message", "All wolves voted, night phase ended, day phase begins");
+        cJSON_AddItemToObject(day_notif, "dead_players", dead_players);
+        char *day_notif_str = cJSON_PrintUnformatted(day_notif);
+        printf("[SERVER] All wolves voted in room %d, broadcasting PHASE_DAY (304) with %d dead players\n", 
+               rooms[room_index].id, cJSON_GetArraySize(dead_players));
+        broadcast_room(room_index, PHASE_DAY, day_notif_str);
+        free(day_notif_str);
+        cJSON_Delete(day_notif);
     }
 }
 #include <stdio.h>
 #include "role_handlers/werewolf_handler.h"
 #include "types.h"
 #include "cJSON.h"
+#include "room_manager.h"
 
 extern Room rooms[MAX_ROOMS];
 

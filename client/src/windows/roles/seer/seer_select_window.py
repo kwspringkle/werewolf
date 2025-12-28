@@ -72,6 +72,7 @@ class SeerSelectWindow(QtWidgets.QWidget):
         col_count = 3
         row = 0
         col = 0
+        print(f"[DEBUG] SeerSelectWindow rendering {len(self.players)} players")
         for p in self.players:
             uname = p.get("username") if isinstance(p, dict) else str(p)
             is_alive = p.get("is_alive", 1) if isinstance(p, dict) else 1

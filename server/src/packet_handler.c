@@ -11,6 +11,8 @@
 #include "room_manager.h"
 #include "role_manager.h"
 #include "role_handlers/seer_handler.h"
+#include "role_handlers/werewolf_handler.h"
+#include "role_handlers/guard_handler.h"
 #include "protocol.h"
 #include "cJSON.h"
 
@@ -36,7 +38,6 @@ void send_packet(int client_fd, uint16_t header, const char *payload) {
 }
 
 void handle_ping(int client_fd, cJSON *json) {
-<<<<<<< HEAD
     // Client gửi PING (để ping server), server trả về PONG
     // Trong game này server gửi PING để check client, nên hàm này ít dùng
     Session *session = find_session(client_fd);

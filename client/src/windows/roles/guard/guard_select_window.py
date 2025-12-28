@@ -13,7 +13,7 @@ class GuardSelectWindow(QtWidgets.QWidget):
         self.selected_username = None
         self.setObjectName("guard_select_window")
         self.setWindowTitle("Guard — Protect a player")
-        self.setFixedSize(500, 600)
+        self.setFixedSize(500, 700)  # Tăng chiều cao để hiển thị nhiều players hơn
         self.setWindowFlags(QtCore.Qt.Dialog | QtCore.Qt.FramelessWindowHint)
         self.setup_ui()
         self.start_timer()
@@ -62,15 +62,33 @@ class GuardSelectWindow(QtWidgets.QWidget):
         self.card_layout.addWidget(title_label)
 
         # Grid chọn user dạng card nhỏ vuông như lobby
+        # Wrap trong scroll area để có thể scroll nếu có nhiều players
+        scroll_area = QtWidgets.QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        scroll_area.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+        scroll_area.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background: transparent;
+            }
+        """)
+        
         self.user_grid_widget = QtWidgets.QWidget()
+        self.user_grid_widget.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         self.user_grid_layout = QtWidgets.QGridLayout(self.user_grid_widget)
         self.user_grid_layout.setSpacing(15)
         self.user_grid_layout.setContentsMargins(10, 10, 10, 10)
+        
+        scroll_area.setWidget(self.user_grid_widget)
 
         self.user_cards = []
         col_count = 3
         row = 0
         col = 0
+        print(f"[DEBUG] GuardSelectWindow rendering {len(self.players)} players")
+        print(f"[DEBUG] GuardSelectWindow players list: {self.players}")
+        # Đảm bảo hiển thị TẤT CẢ players, không filter
         for p in self.players:
             uname = p.get("username") if isinstance(p, dict) else str(p)
             is_alive = p.get("is_alive", 1) if isinstance(p, dict) else 1
@@ -131,12 +149,19 @@ class GuardSelectWindow(QtWidgets.QWidget):
                 card_item.setEnabled(False)
             
             self.user_cards.append((card_item, uname, is_alive))
+            # Set size policy for each card to ensure they're visible
+            card_item.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+            card_item.setMinimumSize(100, 100)
             self.user_grid_layout.addWidget(card_item, row, col)
+            print(f"[DEBUG] Added card for {uname} at row={row}, col={col}")
             col += 1
             if col >= col_count:
                 col = 0
                 row += 1
-        self.card_layout.addWidget(self.user_grid_widget)
+        print(f"[DEBUG] Total cards added to grid: {len(self.user_cards)}")
+        
+        # Add scroll area instead of grid widget directly
+        self.card_layout.addWidget(scroll_area, 1)  # stretch factor = 1
         btn_layout = QtWidgets.QHBoxLayout()
         btn_layout.setSpacing(10)
         self.skip_btn = QtWidgets.QPushButton("Skip")
