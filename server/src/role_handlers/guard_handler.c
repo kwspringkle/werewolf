@@ -9,6 +9,8 @@
 #include "types.h"     // for MAX_ROOMS, Player, Room, ROLE_GUARD
 #include "room_manager.h" // for rooms array
 
+#define WOLF_PHASE_DURATION 30
+
 
 void guard_get_info(int room_index, int player_index, cJSON *info_obj) {
     cJSON_AddStringToObject(info_obj, "role_name", "Guard");
@@ -161,4 +163,14 @@ void guard_handle_protect(int room_index, int requester_index, const char *targe
 
     cJSON_AddStringToObject(response, "status", "success");
     cJSON_AddStringToObject(response, "target_username", target_username);
+    
+    // Báo tất cả client chuyển sang wolf phase
+    printf("[SERVER] Guard has made choice, broadcasting PHASE_WOLF_START to all players in room %d\n", rooms[room_index].id);
+    cJSON *wolf_notif = cJSON_CreateObject();
+    cJSON_AddStringToObject(wolf_notif, "type", "phase_wolf_start");
+    cJSON_AddNumberToObject(wolf_notif, "wolf_duration", WOLF_PHASE_DURATION);
+    char *wolf_notif_str = cJSON_PrintUnformatted(wolf_notif);
+    broadcast_room(room_index, PHASE_WOLF_START, wolf_notif_str);
+    free(wolf_notif_str);
+    cJSON_Delete(wolf_notif);
 }

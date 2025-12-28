@@ -5,6 +5,9 @@
 #include <string.h>
 #include "packet_handler.h"
 #include "protocol.h"
+#include "room_manager.h"
+
+#define GUARD_PHASE_DURATION 30
 
 void seer_get_info(int room_index, int player_index, cJSON *info_obj) {
     cJSON_AddStringToObject(info_obj, "role_name", "Seer");
@@ -160,4 +163,14 @@ void seer_handle_check(int room_index, int requester_index, const char *target_u
     cJSON_AddStringToObject(response, "status", "success");
     cJSON_AddStringToObject(response, "target_username", target_username);
     cJSON_AddBoolToObject(response, "is_werewolf", is_werewolf);
+    
+    // Báo tất cả client chuyển sang guard phase
+    printf("[SERVER] Seer has made choice, broadcasting PHASE_GUARD_START to all players in room %d\n", rooms[room_index].id);
+    cJSON *guard_notif = cJSON_CreateObject();
+    cJSON_AddStringToObject(guard_notif, "type", "phase_guard_start");
+    cJSON_AddNumberToObject(guard_notif, "guard_duration", GUARD_PHASE_DURATION);
+    char *guard_notif_str = cJSON_PrintUnformatted(guard_notif);
+    broadcast_room(room_index, PHASE_GUARD_START, guard_notif_str);
+    free(guard_notif_str);
+    cJSON_Delete(guard_notif);
 }

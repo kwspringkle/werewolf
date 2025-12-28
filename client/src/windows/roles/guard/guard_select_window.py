@@ -107,6 +107,10 @@ class GuardSelectWindow(QtWidgets.QWidget):
             name_label.setWordWrap(True)
             card_item_layout.addWidget(name_label)
 
+            # Make card clickable
+            card_item.mousePressEvent = self._make_card_click(card_item, uname, is_alive)
+            card_item.setCursor(QtCore.Qt.PointingHandCursor)
+            
             self.user_cards.append((card_item, uname, is_alive))
             self.user_grid_layout.addWidget(card_item, row, col)
             col += 1
@@ -140,6 +144,7 @@ class GuardSelectWindow(QtWidgets.QWidget):
         btn_layout.addWidget(self.skip_btn)
         self.select_btn = QtWidgets.QPushButton("Protect")
         self.select_btn.setMinimumHeight(35)
+        self.select_btn.setEnabled(False)  # Disabled until player is selected
         self.select_btn.setStyleSheet("""
             QPushButton {
                 background-color: #43d9ad;
@@ -180,14 +185,37 @@ class GuardSelectWindow(QtWidgets.QWidget):
             self.timer.stop()
             self.on_skip()
 
-    def _make_card_click(self, card_item, uname):
+    def _make_card_click(self, card_item, uname, is_alive):
         def handler(event):
+            # Only allow selection if player is alive
+            if not is_alive:
+                return
+            
+            # Bỏ chọn tất cả
             for c, _, alive in self.user_cards:
-                c.setProperty("selected", False)
-                c.setStyleSheet(c.styleSheet())
+                if alive:  # Only update style for alive players
+                    c.setProperty("selected", False)
+                    # Update style to show unselected
+                    c.setStyleSheet(f"""
+                        QFrame#user_card {{
+                            background-color: #1a1a2e;
+                            border: 2px solid #43d9ad;
+                            border-radius: 10px;
+                        }}
+                    """)
+            
+            # Chọn card này
             card_item.setProperty("selected", True)
-            card_item.setStyleSheet(card_item.styleSheet())
+            card_item.setStyleSheet(f"""
+                QFrame#user_card {{
+                    background-color: #2a4a5e;
+                    border: 3px solid #43d9ad;
+                    border-radius: 10px;
+                }}
+            """)
             self.selected_username = uname
+            # Enable protect button
+            self.select_btn.setEnabled(True)
         return handler
 
     def on_select(self):
@@ -195,16 +223,45 @@ class GuardSelectWindow(QtWidgets.QWidget):
         if not target:
             QtWidgets.QMessageBox.warning(self, "Select player", "Please select a player to protect")
             return
+        
+        # Disable buttons to prevent multiple clicks
+        self.select_btn.setEnabled(False)
+        self.skip_btn.setEnabled(False)
+        
+        # Stop timer
+        if hasattr(self, 'timer'):
+            self.timer.stop()
+        
         if self.network_client and self.room_id is not None:
             try:
-                # Gửi yêu cầu đến server
-                self.network_client.send_guard_protect(self.room_id, target)
+                # Gửi GUARD_PROTECT_REQ (407) đến server
+                print(f"[DEBUG] Sending GUARD_PROTECT_REQ for target: {target}")
+                self.network_client.send_packet(407, {
+                    "room_id": self.room_id,
+                    "target_username": target
+                })
             except Exception as e:
-                print(f"Error sending guard protect: {e}")
+                print(f"[ERROR] Error sending guard protect request: {e}")
                 QtWidgets.QMessageBox.warning(self, "Network", "Failed to send guard protect request")
+                # Re-enable buttons on error
+                self.select_btn.setEnabled(True)
+                self.skip_btn.setEnabled(True)
+                if hasattr(self, 'timer'):
+                    self.timer.start(1000)
+                return
+        
+        # Close window - server sẽ broadcast PHASE_WOLF_START khi guard chọn xong
         self.close()
 
     def on_skip(self):
+        # Stop timer
+        if hasattr(self, 'timer'):
+            self.timer.stop()
+        # Disable buttons
+        self.select_btn.setEnabled(False)
+        self.skip_btn.setEnabled(False)
+        # Close window - server sẽ broadcast PHASE_WOLF_START khi timeout
+        # Không cần gửi gì lên server, chỉ cần đóng window
         self.close()
 
     def closeEvent(self, event):

@@ -35,6 +35,8 @@ typedef enum {
     PHASE_DAY = 304,
     GAME_OVER = 305,
     ROLE_CARD_DONE_REQ = 310,
+    PHASE_GUARD_START = 311,  // Báo tất cả client chuyển sang guard phase
+    PHASE_WOLF_START = 312,   // Báo tất cả client chuyển sang wolf phase
 
     // Game actions (400-499)
     CHAT_REQ = 401,

@@ -54,6 +54,22 @@ void start_night_phase(int room_index, int duration_seconds) {
     printf("  - Wolf deadline: %ld (guard_deadline + %d seconds)\n", rooms[room_index].wolf_deadline, WOLF_PHASE_DURATION);
     printf("  - Total duration: %d seconds\n", total_duration);
     
+    // In role của từng người chơi
+    printf("[SERVER] Room %d - Player roles:\n", rooms[room_index].id);
+    for (int i = 0; i < rooms[room_index].current_players; i++) {
+        const char *role_name = "UNKNOWN";
+        switch (rooms[room_index].players[i].role) {
+            case 0: role_name = "VILLAGER"; break;
+            case 1: role_name = "WEREWOLF"; break;
+            case 2: role_name = "SEER"; break;
+            case 3: role_name = "GUARD"; break;
+        }
+        printf("  - %s: %s (alive: %d)\n", 
+               rooms[room_index].players[i].username, 
+               role_name,
+               rooms[room_index].players[i].is_alive);
+    }
+    
     rooms[room_index].seer_choice_made = 0;
     rooms[room_index].seer_chosen_target[0] = '\0';
     rooms[room_index].guard_choice_made = 0;
@@ -132,6 +148,61 @@ void check_role_card_timeouts() {
             // Timeout: bắt đầu night phase (duration sẽ được tính từ các phase duration)
             printf("Role card timeout for room %d, starting night phase\n", rooms[i].id);
             start_night_phase(i, 0);  // Parameter không dùng nữa, nhưng giữ để backward compatible
+        }
+    }
+}
+
+void check_seer_phase_timeout() {
+    time_t now = time(NULL);
+    
+    for (int i = 0; i < MAX_ROOMS; i++) {
+        if (rooms[i].id == 0) continue;
+        if (rooms[i].status != ROOM_PLAYING) continue;
+        if (!rooms[i].night_phase_active) continue; // Not in night phase
+        if (rooms[i].seer_choice_made) continue; // Seer already made choice
+        if (rooms[i].seer_deadline == 0) continue; // No deadline set
+        
+        // Check if seer deadline has passed
+        if (now >= rooms[i].seer_deadline) {
+            printf("[SERVER] Seer phase timeout for room %d, broadcasting PHASE_GUARD_START\n", rooms[i].id);
+            rooms[i].seer_choice_made = 1; // Mark as done to prevent multiple broadcasts
+            
+            // Broadcast guard phase start to all players
+            cJSON *guard_notif = cJSON_CreateObject();
+            cJSON_AddStringToObject(guard_notif, "type", "phase_guard_start");
+            cJSON_AddNumberToObject(guard_notif, "guard_duration", GUARD_PHASE_DURATION);
+            char *guard_notif_str = cJSON_PrintUnformatted(guard_notif);
+            broadcast_room(i, PHASE_GUARD_START, guard_notif_str);
+            free(guard_notif_str);
+            cJSON_Delete(guard_notif);
+        }
+    }
+}
+
+void check_guard_phase_timeout() {
+    time_t now = time(NULL);
+    
+    for (int i = 0; i < MAX_ROOMS; i++) {
+        if (rooms[i].id == 0) continue;
+        if (rooms[i].status != ROOM_PLAYING) continue;
+        if (!rooms[i].night_phase_active) continue; // Not in night phase
+        if (!rooms[i].seer_choice_made) continue; // Seer phase not finished yet
+        if (rooms[i].guard_choice_made) continue; // Guard already made choice
+        if (rooms[i].guard_deadline == 0) continue; // No deadline set
+        
+        // Check if guard deadline has passed
+        if (now >= rooms[i].guard_deadline) {
+            printf("[SERVER] Guard phase timeout for room %d, broadcasting PHASE_WOLF_START\n", rooms[i].id);
+            rooms[i].guard_choice_made = 1; // Mark as done to prevent multiple broadcasts
+            
+            // Broadcast wolf phase start to all players
+            cJSON *wolf_notif = cJSON_CreateObject();
+            cJSON_AddStringToObject(wolf_notif, "type", "phase_wolf_start");
+            cJSON_AddNumberToObject(wolf_notif, "wolf_duration", WOLF_PHASE_DURATION);
+            char *wolf_notif_str = cJSON_PrintUnformatted(wolf_notif);
+            broadcast_room(i, PHASE_WOLF_START, wolf_notif_str);
+            free(wolf_notif_str);
+            cJSON_Delete(wolf_notif);
         }
     }
 }

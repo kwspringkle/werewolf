@@ -28,6 +28,8 @@ class NightPhaseController:
         self.guard_window = None
         self.wolf_controller = None
         self.seer_choice_made = False
+        self.guard_phase_started = False  # Flag để tránh chuyển phase nhiều lần
+        self.wolf_phase_started = False   # Flag để tránh chuyển phase nhiều lần
         print(f"[DEBUG] NightPhaseController initialized - seer: {self.is_seer}, guard: {self.is_guard}, wolf: {self.is_wolf}")
         print(f"[DEBUG] Phase durations - seer: {self.seer_duration}s, guard: {self.guard_duration}s, wolf: {self.wolf_duration}s")
 
@@ -148,18 +150,32 @@ class NightPhaseController:
     
     def _on_seer_result_closed(self):
         """Called when seer result window is closed"""
-        print("[DEBUG] Seer result window closed, moving to guard phase...")
+        print("[DEBUG] Seer result window closed")
         if self.seer_result_window:
             self.seer_result_window = None
-        # Move to guard phase immediately
-        self.start_guard_phase()
+        # Không tự động chuyển sang guard phase - đợi server broadcast PHASE_GUARD_START
+        # Nếu server đã broadcast thì guard_phase_started sẽ là True
+        if not self.guard_phase_started:
+            print("[DEBUG] Waiting for PHASE_GUARD_START from server...")
+        else:
+            print("[DEBUG] Guard phase already started, skipping")
 
     def start_guard_phase(self):
+        # Tránh chuyển phase nhiều lần
+        if self.guard_phase_started:
+            print("[DEBUG] Guard phase already started, skipping...")
+            return
+        
         print("[DEBUG] Starting guard phase...")
-        # Close seer result window if still open
+        self.guard_phase_started = True
+        
+        # Close seer windows if still open
         if self.seer_result_window:
             self.seer_result_window.close()
             self.seer_result_window = None
+        if self.seer_window:
+            self.seer_window.close()
+            self.seer_window = None
         
         if self.is_guard:
             print("[DEBUG] User is guard - showing GuardSelectWindow")
@@ -174,7 +190,8 @@ class NightPhaseController:
             self.guard_window.raise_()
             self.guard_window.activateWindow()
             QtCore.QTimer.singleShot(100, lambda: self.guard_window.activateWindow())
-            self.guard_window.destroyed.connect(self.start_wolf_phase)
+            # Guard window sẽ tự đóng khi guard chọn xong, nhưng không tự động chuyển sang wolf
+            # Đợi server broadcast PHASE_WOLF_START (không connect destroyed signal)
         else:
             print("[DEBUG] User is not guard - showing GuardWaitWindow")
             self.guard_window = GuardWaitWindow(self.guard_duration)
@@ -188,21 +205,44 @@ class NightPhaseController:
             self.guard_window.raise_()
             self.guard_window.activateWindow()
             QtCore.QTimer.singleShot(100, lambda: self.guard_window.activateWindow())
-            QtCore.QTimer.singleShot(self.guard_duration * 1000, self.start_wolf_phase)
+            # Không tự động chuyển sang wolf phase - đợi server broadcast PHASE_WOLF_START
+            # Timer chỉ để đóng window nếu cần
 
     def start_wolf_phase(self):
+        # Tránh chuyển phase nhiều lần
+        if self.wolf_phase_started:
+            print("[DEBUG] Wolf phase already started, skipping...")
+            return
+        
         print("[DEBUG] Starting wolf phase...")
+        self.wolf_phase_started = True
+        
+        # Close guard window if still open
+        if self.guard_window:
+            self.guard_window.close()
+            self.guard_window = None
+        
         player_list = [p['username'] for p in self.players if p['username'] != self.my_username]
         alive_status = [p.get('is_alive', 1) for p in self.players if p['username'] != self.my_username]
+        
         if self.is_wolf:
             print("[DEBUG] User is wolf - showing WolfPhaseController")
+            self.wolf_controller = WolfPhaseController(
+                player_list, alive_status, self.my_username, self.wolf_usernames,
+                network_client=self.network_client, room_id=self.room_id, duration_seconds=self.wolf_duration
+            )
+            self.wolf_controller.setWindowModality(QtCore.Qt.ApplicationModal)
+            # Center the window on screen
+            screen = QtWidgets.QApplication.desktop().screenGeometry()
+            window_geometry = self.wolf_controller.frameGeometry()
+            window_geometry.moveCenter(screen.center())
+            self.wolf_controller.move(window_geometry.topLeft())
+            self.wolf_controller.show()
+            self.wolf_controller.raise_()
+            self.wolf_controller.activateWindow()
+            QtCore.QTimer.singleShot(100, lambda: self.wolf_controller.activateWindow())
         else:
-            print("[DEBUG] User is not wolf - will show wait/other UI")
-        self.wolf_controller = WolfPhaseController(
-            player_list, alive_status, self.my_username, self.wolf_usernames,
-            network_client=self.network_client, room_id=self.room_id, duration_seconds=self.wolf_duration
-        )
-        self.wolf_controller.setWindowModality(QtCore.Qt.ApplicationModal)
-        self.wolf_controller.show()
-        self.wolf_controller.raise_()
-        self.wolf_controller.activateWindow()
+            print("[DEBUG] User is not wolf - showing wait window")
+            # Non-wolf players sẽ thấy wait window (có thể tạo WolfWaitWindow tương tự)
+            # Hoặc chỉ đợi wolf phase kết thúc
+            # Tạm thời không làm gì, có thể thêm WolfWaitWindow sau

@@ -573,6 +573,38 @@ class RoomWindow(QtWidgets.QWidget):
             else:
                 msg = payload.get("message", "Seer check failed")
                 self.toast_manager.warning(msg)
+        
+        elif header == 311:  # PHASE_GUARD_START
+            # Server báo tất cả client chuyển sang guard phase
+            print("[DEBUG] Received PHASE_GUARD_START from server, moving to guard phase")
+            guard_duration = payload.get("guard_duration", 30)
+            
+            # Get night phase controller from shared data
+            night_ctrl = self.window_manager.get_shared_data("night_phase_controller")
+            if night_ctrl:
+                # Update guard duration if needed
+                night_ctrl.guard_duration = guard_duration
+                # Chuyển sang guard phase - guard sẽ thấy GuardSelectWindow, còn lại thấy GuardWaitWindow
+                night_ctrl.start_guard_phase()
+            else:
+                print("[ERROR] Night phase controller not found when receiving PHASE_GUARD_START")
+                self.toast_manager.warning("Error: Night phase controller not initialized")
+        
+        elif header == 312:  # PHASE_WOLF_START
+            # Server báo tất cả client chuyển sang wolf phase
+            print("[DEBUG] Received PHASE_WOLF_START from server, moving to wolf phase")
+            wolf_duration = payload.get("wolf_duration", 30)
+            
+            # Get night phase controller from shared data
+            night_ctrl = self.window_manager.get_shared_data("night_phase_controller")
+            if night_ctrl:
+                # Update wolf duration if needed
+                night_ctrl.wolf_duration = wolf_duration
+                # Chuyển sang wolf phase - wolf sẽ thấy WolfPhaseController, còn lại thấy wait window
+                night_ctrl.start_wolf_phase()
+            else:
+                print("[ERROR] Night phase controller not found when receiving PHASE_WOLF_START")
+                self.toast_manager.warning("Error: Night phase controller not initialized")
     
     def start_night_phase(self, duration, seer_duration=30, guard_duration=30, wolf_duration=30):
         """Bắt đầu night phase (được gọi khi nhận PHASE_NIGHT từ server)"""

@@ -13,5 +13,9 @@ void cleanup_empty_rooms();
 void start_night_phase(int room_index, int duration_seconds);
 // Check role card timeout (30s) and start night phase if needed
 void check_role_card_timeouts();
+// Check seer phase timeout and broadcast guard phase start
+void check_seer_phase_timeout();
+// Check guard phase timeout and broadcast wolf phase start
+void check_guard_phase_timeout();
 
 #endif
