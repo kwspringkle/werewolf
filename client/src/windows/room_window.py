@@ -4,7 +4,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from utils.image_utils import set_window_icon
 from components.user_header import UserHeader
-from windows.role_card_window import RoleCardWindow
 from utils.connection_monitor import ConnectionMonitor
 
 
@@ -182,9 +181,10 @@ class RoomWindow(QtWidgets.QWidget):
     def hideEvent(self, event):
         """Called when window is hidden"""
         super().hideEvent(event)
-        self.recv_timer.stop()
-        if self.connection_monitor:
-            self.connection_monitor.stop()
+        # KHÔNG dừng recv_timer khi hide - vẫn cần receive packets khi ở night_begin hoặc role_card
+        # Chỉ dừng khi thực sự rời khỏi room (leave room, logout, etc.)
+        # self.recv_timer.stop()  # Comment out để vẫn receive packets
+        # Connection monitor vẫn chạy để monitor connection
         
     def update_player_list(self, players, current_username):
         """Cập nhật widget danh sách người chơi"""
@@ -311,6 +311,9 @@ class RoomWindow(QtWidgets.QWidget):
             
     def receive_packets(self):
         """Nhận gói tin từ server"""
+        if not self.network_client:
+            return
+            
         try:
             header, payload = self.network_client.receive_packet()
 
@@ -318,23 +321,59 @@ class RoomWindow(QtWidgets.QWidget):
                 return
 
             self.handle_packet(header, payload)
-
+            
+        except RuntimeError as e:
+            error_msg = str(e)
+            # Kiểm tra xem có phải server disconnect không
+            if "Server closed" in error_msg or "Receive failed" in error_msg:
+                print(f"[ERROR] Server disconnected: {error_msg}")
+                # Chỉ handle disconnect nếu thực sự disconnect, không phải timeout
+                if self.recv_timer.isActive():
+                    self.handle_server_disconnect()
+            else:
+                # Không hiển thị error cho mọi exception - có thể chỉ là timeout
+                print(f"[DEBUG] Receive error (non-critical): {error_msg}")
         except ConnectionError as e:
             # Connection lost detected
             print(f"[DEBUG] Connection lost: {e}")
-            self.recv_timer.stop()
-
             # Trigger connection lost handling via monitor
             if self.connection_monitor:
                 self.connection_monitor.is_connected = False
                 self.connection_monitor.stop()
                 self.connection_monitor.handle_connection_lost()
-
         except Exception as e:
-            # Other errors - just show toast
-            error_msg = str(e)
-            print(f"[DEBUG] Other error: {error_msg}")
-            self.toast_manager.error(f"Receive error: {error_msg}")
+            # Catch all other exceptions để tránh crash
+            print(f"[WARNING] Unexpected error in receive_packets: {e}")
+            import traceback
+            traceback.print_exc()
+            
+    def handle_server_disconnect(self):
+        """Xử lý khi server disconnect"""
+        print("[DEBUG] Handling server disconnect...")
+        # Dừng receive timer
+        self.recv_timer.stop()
+        
+        # Hiển thị thông báo
+        self.toast_manager.error("⚠️ Server disconnected! Returning to welcome screen...")
+        
+        # Cleanup network client
+        try:
+            if self.network_client:
+                self.network_client.disconnect()
+                self.network_client.destroy()
+        except Exception as e:
+            print(f"[ERROR] Error during cleanup: {e}")
+        
+        # Clear shared data
+        self.window_manager.set_shared_data("user_id", None)
+        self.window_manager.set_shared_data("username", None)
+        self.window_manager.set_shared_data("current_room_id", None)
+        self.window_manager.set_shared_data("current_room_name", None)
+        self.window_manager.set_shared_data("is_host", False)
+        self.window_manager.set_shared_data("network_client", None)
+        
+        # Navigate về welcome screen
+        self.window_manager.navigate_to("welcome")
             
     def handle_packet(self, header, payload):
         """Xử lý gói tin nhận được"""
@@ -349,7 +388,23 @@ class RoomWindow(QtWidgets.QWidget):
             return
 
         username = self.window_manager.get_shared_data("username")
+        # Guard protect response - this shouldn't trigger night phase start
+        # Night phase should start from PHASE_NIGHT (303) packet
+        if header == 407:  # GUARD_PROTECT_REQ (this is wrong - 407 is request, should be response)
+            # Actually this seems wrong - 407 is GUARD_PROTECT_REQ from protocol.h
+            # This handler should probably be removed or handle something else
+            pass
 
+        if header == 408:  # GUARD_PROTECT_RES
+            # Optionally handle guard result/confirmation here (e.g., show toast)
+            status = payload.get("status")
+            if status == "success":
+                self.toast_manager.success("Guard action sent!")
+            else:
+                msg = payload.get("message", "Guard action failed")
+                self.toast_manager.warning(msg)
+            return
+        
         if header == 207:  # ROOM_STATUS_UPDATE
             update_type = payload.get("type")
             
@@ -490,6 +545,7 @@ class RoomWindow(QtWidgets.QWidget):
                 
         elif header == 302:  # GAME_START_RES_AND_ROLE
             if payload.get("status") == "success":
+                print("[DEBUG] Game Started! Received role assignment")
                 
                 # Show toast for game start
                 self.toast_manager.success("🎮 Game Started!")
@@ -498,18 +554,284 @@ class RoomWindow(QtWidgets.QWidget):
                 self.start_game_button.setEnabled(False)
                 self.leave_room_button.setEnabled(False)
                 
-                # Show role card dialog (modal, 30s timer)
-                role_card = RoleCardWindow(payload, self)
-                role_card.exec_()  # Blocks until user closes or timer ends
-                
-                # After role card is closed
-                # TODO: Navigate to game window or start night phase
-                self.toast_manager.info("Night phase will begin...")
+                # Save role info for later (used during night)
+                self.window_manager.set_shared_data("role_info", payload)
+
+                # Navigate to role card window
+                # Role card window will send ROLE_CARD_DONE_REQ when ready/timer expires
+                # and then navigate to night_begin window
+                self.window_manager.navigate_to("role_card")
                 
             else:
                 msg = payload.get("message", "Unknown error")
                 self.toast_manager.error(f"Failed to start game: {msg}")
+        elif header == 303:  # PHASE_NIGHT
+            print("[DEBUG] Received PHASE_NIGHT from server, starting night phase")
+            # payload may contain duration và các phase duration riêng
+            duration = payload.get("duration", 90)  # Total duration (seer + guard + wolf)
+            seer_duration = payload.get("seer_duration", 30)
+            guard_duration = payload.get("guard_duration", 30)
+            wolf_duration = payload.get("wolf_duration", 30)
+            print(f"[DEBUG] Phase durations - seer: {seer_duration}s, guard: {guard_duration}s, wolf: {wolf_duration}s, total: {duration}s")
+            
+            # Lấy players list từ server (đảm bảo tất cả clients có cùng players list)
+            players_from_server = payload.get("players", [])
+            if players_from_server:
+                # Update room_players trong shared_data với players list từ server
+                # Đảm bảo tất cả clients có cùng players list
+                self.window_manager.set_shared_data("room_players", players_from_server)
+                print(f"[DEBUG] Updated room_players from server: {len(players_from_server)} players")
+                print(f"[DEBUG] Players from server: {[p.get('username', 'unknown') for p in players_from_server]}")
+            else:
+                print(f"[WARNING] No players list in PHASE_NIGHT packet, using existing room_players")
+            
+            # Đóng tất cả các window có thể đang mở (role_card, night_begin)
+            # Đảm bảo đóng đúng cách để tránh window trắng
+            if "night_begin" in self.window_manager.windows:
+                night_begin_win = self.window_manager.windows["night_begin"]
+                if night_begin_win.isVisible():
+                    print(f"[DEBUG] Closing night_begin_window, starting night phase")
+                    night_begin_win.hide()
+                    if hasattr(night_begin_win, 'timer') and night_begin_win.timer:
+                        night_begin_win.timer.stop()
+            
+            if "role_card" in self.window_manager.windows:
+                role_card_win = self.window_manager.windows["role_card"]
+                if role_card_win.isVisible():
+                    print(f"[DEBUG] Closing role_card_window, starting night phase")
+                    role_card_win.hide()
+            
+            # Bắt đầu night phase ngay (sẽ show seer select hoặc seer wait)
+            self.start_night_phase(duration, seer_duration, guard_duration, wolf_duration)
 
+        elif header == 501:  # PING
+            # Server gửi PING để kiểm tra connection, client trả về PONG
+            try:
+                import json
+                self.network_client.send_packet(502, {"type": "pong"})  # 502 = PONG
+            except Exception as e:
+                print(f"[ERROR] Failed to send PONG: {e}")
+        elif header == 502:  # PONG
+            # Server trả về PONG sau khi client gửi PING (không cần xử lý gì)
+            pass
+        elif header == 406:  # SEER_RESULT
+            # Only the seer will receive this normally
+            status = payload.get("status")
+            if status == "success":
+                target = payload.get("target_username")
+                is_wolf = bool(payload.get("is_werewolf"))
+                # Get night phase controller from shared data
+                night_ctrl = self.window_manager.get_shared_data("night_phase_controller")
+                if night_ctrl:
+                    night_ctrl.handle_seer_result(target, is_wolf)
+                else:
+                    print("[ERROR] Night phase controller not found when receiving SEER_RESULT")
+                    self.toast_manager.warning("Error: Night phase controller not initialized")
+            else:
+                msg = payload.get("message", "Seer check failed")
+                self.toast_manager.warning(msg)
+        
+        elif header == 311:  # PHASE_GUARD_START
+            # Server báo tất cả client chuyển sang guard phase
+            print("[DEBUG] Received PHASE_GUARD_START from server, moving to guard phase")
+            guard_duration = payload.get("guard_duration", 30)
+            
+            # Get night phase controller from shared data
+            night_ctrl = self.window_manager.get_shared_data("night_phase_controller")
+            if night_ctrl:
+                # Không cần update players list - giữ nguyên từ khi start_night_phase
+                # players list đã được set đúng khi start_night_phase với đầy đủ thông tin
+                print(f"[DEBUG] Guard phase - using existing players list: {len(night_ctrl.players)} players")
+                print(f"[DEBUG] Players usernames: {[p.get('username', 'unknown') if isinstance(p, dict) else str(p) for p in night_ctrl.players]}")
+                
+                # Update guard duration if needed
+                night_ctrl.guard_duration = guard_duration
+                # Chuyển sang guard phase - guard sẽ thấy GuardSelectWindow, còn lại thấy GuardWaitWindow
+                night_ctrl.start_guard_phase()
+            else:
+                print("[ERROR] Night phase controller not found when receiving PHASE_GUARD_START")
+                self.toast_manager.warning("Error: Night phase controller not initialized")
+        
+        elif header == 312:  # PHASE_WOLF_START
+            # Server báo tất cả client chuyển sang wolf phase
+            print("[DEBUG] Received PHASE_WOLF_START from server, moving to wolf phase")
+            wolf_duration = payload.get("wolf_duration", 30)
+            
+            # Get night phase controller from shared data
+            night_ctrl = self.window_manager.get_shared_data("night_phase_controller")
+            if night_ctrl:
+                # Không cần update players list - giữ nguyên từ khi start_night_phase
+                # players list đã được set đúng khi start_night_phase với đầy đủ thông tin
+                print(f"[DEBUG] Wolf phase - using existing players list: {len(night_ctrl.players)} players")
+                print(f"[DEBUG] Players usernames: {[p.get('username', 'unknown') if isinstance(p, dict) else str(p) for p in night_ctrl.players]}")
+                
+                # Re-check role info to ensure is_wolf is correct
+                role_info = self.window_manager.get_shared_data("role_info", {})
+                role_num = role_info.get("role", 0)
+                is_wolf = (role_num == 1)
+                # Update is_wolf in night_ctrl to ensure correct detection
+                night_ctrl.is_wolf = is_wolf
+                # Also update wolf_usernames from role_info
+                wolf_usernames = role_info.get("werewolf_team", [])
+                if not wolf_usernames:
+                    # Fallback: check role in players list
+                    wolf_usernames = [p.get("username") for p in night_ctrl.players if p.get("role") == 1]
+                night_ctrl.wolf_usernames = wolf_usernames
+                
+                print(f"[DEBUG] Updated wolf info - is_wolf: {is_wolf}, wolf_usernames: {wolf_usernames}")
+                print(f"[DEBUG] All players in room: {[p.get('username', 'unknown') if isinstance(p, dict) else str(p) for p in night_ctrl.players]}")
+                
+                # Update wolf duration if needed
+                night_ctrl.wolf_duration = wolf_duration
+                # Chuyển sang wolf phase - wolf sẽ thấy WolfPhaseController, còn lại thấy wait window
+                night_ctrl.start_wolf_phase()
+            else:
+                print("[ERROR] Night phase controller not found when receiving PHASE_WOLF_START")
+                self.toast_manager.warning("Error: Night phase controller not initialized")
+        
+        elif header == 304:  # PHASE_DAY
+            # Server báo bắt đầu day phase sau khi night phase kết thúc
+            print("[DEBUG] Received PHASE_DAY from server, starting day phase")
+            
+            # Lấy danh sách người chết từ payload
+            dead_players = payload.get("dead_players", [])
+            print(f"[DEBUG] Dead players: {dead_players}")
+            
+            # Đóng tất cả các window của night phase
+            night_ctrl = self.window_manager.get_shared_data("night_phase_controller")
+            if night_ctrl:
+                # Close all night phase windows - đóng đúng cách để tránh crash
+                try:
+                    if hasattr(night_ctrl, 'seer_window') and night_ctrl.seer_window:
+                        if night_ctrl.seer_window.isVisible():
+                            night_ctrl.seer_window.hide()
+                            night_ctrl.seer_window.close()
+                except Exception as e:
+                    print(f"[WARNING] Error closing seer_window: {e}")
+                
+                try:
+                    if hasattr(night_ctrl, 'seer_result_window') and night_ctrl.seer_result_window:
+                        if night_ctrl.seer_result_window.isVisible():
+                            night_ctrl.seer_result_window.hide()
+                            night_ctrl.seer_result_window.close()
+                except Exception as e:
+                    print(f"[WARNING] Error closing seer_result_window: {e}")
+                
+                try:
+                    if hasattr(night_ctrl, 'guard_window') and night_ctrl.guard_window:
+                        if night_ctrl.guard_window.isVisible():
+                            night_ctrl.guard_window.hide()
+                            night_ctrl.guard_window.close()
+                except Exception as e:
+                    print(f"[WARNING] Error closing guard_window: {e}")
+                
+                try:
+                    if hasattr(night_ctrl, 'wolf_controller') and night_ctrl.wolf_controller:
+                        if night_ctrl.wolf_controller.isVisible():
+                            night_ctrl.wolf_controller.hide()
+                            night_ctrl.wolf_controller.close()
+                except Exception as e:
+                    print(f"[WARNING] Error closing wolf_controller: {e}")
+            
+            # Hiển thị death announcement window
+            if "death_announcement" in self.window_manager.windows:
+                death_window = self.window_manager.windows["death_announcement"]
+                death_window.set_dead_players(dead_players)
+                # Set window flags để hiển thị như modal
+                death_window.setWindowFlags(QtCore.Qt.Dialog | QtCore.Qt.FramelessWindowHint)
+                # Center window trên màn hình
+                screen = QtWidgets.QApplication.desktop().screenGeometry()
+                window_geometry = death_window.frameGeometry()
+                window_geometry.moveCenter(screen.center())
+                death_window.move(window_geometry.topLeft())
+                death_window.show()
+                death_window.raise_()
+                death_window.activateWindow()
+            else:
+                print("[ERROR] Death announcement window not registered")
+                # Fallback: navigate directly to day chat
+                self.window_manager.navigate_to("day_chat")
+    
+    def start_night_phase(self, duration, seer_duration=30, guard_duration=30, wolf_duration=30):
+        """Bắt đầu night phase (được gọi khi nhận PHASE_NIGHT từ server)"""
+        print(f"[DEBUG] Starting night phase - total: {duration}s, seer: {seer_duration}s, guard: {guard_duration}s, wolf: {wolf_duration}s")
+        
+        # Đảm bảo đóng tất cả các window có thể che mất seer window
+        # Đóng tất cả windows trong window_manager
+        if "night_begin" in self.window_manager.windows:
+            night_begin_win = self.window_manager.windows["night_begin"]
+            if night_begin_win.isVisible():
+                print(f"[DEBUG] Force closing night_begin_window before starting night phase")
+                night_begin_win.hide()
+                if hasattr(night_begin_win, 'timer') and night_begin_win.timer:
+                    night_begin_win.timer.stop()
+        
+        if "role_card" in self.window_manager.windows:
+            role_card_win = self.window_manager.windows["role_card"]
+            if role_card_win.isVisible():
+                print(f"[DEBUG] Force closing role_card_window before starting night phase")
+                role_card_win.hide()
+        
+        # Lấy lại các thông tin cần thiết
+        role_info = self.window_manager.get_shared_data("role_info", {})
+        # Server sends role as number: 0=VILLAGER, 1=WEREWOLF, 2=SEER, 3=GUARD
+        role_num = role_info.get("role", 0)
+        is_seer = (role_num == 2)
+        is_guard = (role_num == 3)
+        is_wolf = (role_num == 1)
+        
+        # Lấy players list từ shared_data (đã được update từ PHASE_NIGHT packet)
+        players_raw = self.window_manager.get_shared_data("room_players", [])
+        my_username = self.window_manager.get_shared_data("username")
+        room_id = self.window_manager.get_shared_data("current_room_id")
+        
+        # Đảm bảo players có đầy đủ thông tin: username và is_alive
+        # Players list từ server đã có is_alive, chỉ cần normalize format
+        players = []
+        for p in players_raw:
+            if isinstance(p, dict):
+                # Đảm bảo có username và is_alive
+                player_info = {
+                    "username": p.get("username", ""),
+                    "is_alive": p.get("is_alive", 1),  # Server gửi is_alive, mặc định 1 nếu không có
+                    "role": p.get("role", None)  # Giữ role nếu có
+                }
+            else:
+                # Nếu p là string (username) - fallback
+                player_info = {
+                    "username": str(p),
+                    "is_alive": 1,  # Mặc định là alive
+                    "role": None
+                }
+            players.append(player_info)
+        
+        # Debug: Print players list
+        print(f"[DEBUG] start_night_phase - players count: {len(players)}")
+        print(f"[DEBUG] start_night_phase - players: {players}")
+        print(f"[DEBUG] start_night_phase - all players usernames: {[p.get('username', 'unknown') for p in players]}")
+        
+        # Get wolf usernames from werewolf team if available, otherwise check role
+        wolf_usernames = role_info.get("werewolf_team", [])
+        if not wolf_usernames:
+            # Fallback: check role in players list (though this might not work if role not exposed)
+            wolf_usernames = [p["username"] for p in players if p.get("role") == 1]
+        
+        print(f"[DEBUG] Player role - is_seer: {is_seer}, is_guard: {is_guard}, is_wolf: {is_wolf}")
+        
+        from .night_phase_controller import NightPhaseController
+        night_ctrl = NightPhaseController(
+            self.window_manager, self.network_client, players, my_username, room_id,
+            is_seer, is_guard, is_wolf, wolf_usernames, 
+            seer_duration, guard_duration, wolf_duration
+        )
+        # Store night controller in window_manager so SEER_RESULT can access it
+        self.window_manager.set_shared_data("night_phase_controller", night_ctrl)
+        
+        # Start night phase - this will show seer window immediately
+        print("[DEBUG] Calling night_ctrl.start() to show seer window...")
+        night_ctrl.start()
+        print("[DEBUG] night_ctrl.start() completed")
+    
     def on_connection_lost(self):
         """Handle connection lost"""
         self.recv_timer.stop()

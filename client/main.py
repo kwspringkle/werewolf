@@ -14,6 +14,10 @@ from windows.register_window import RegisterWindow
 from windows.login_window import LoginWindow
 from windows.lobby_window import LobbyWindow
 from windows.room_window import RoomWindow
+from windows.role_card_window import RoleCardWindow
+from windows.night_begin_window import NightBeginWindow
+from windows.death_announcement_window import DeathAnnouncementWindow
+from windows.day_chat_window import DayChatWindow
 
 
 class WerewolfApplication:    
@@ -82,12 +86,36 @@ class WerewolfApplication:
             self.window_manager
         )
         
+        self.role_card_window = RoleCardWindow(
+            self.toast_manager,
+            self.window_manager
+        )
+        
+        self.night_begin_window = NightBeginWindow(
+            self.toast_manager,
+            self.window_manager
+        )
+        
+        self.death_announcement_window = DeathAnnouncementWindow(
+            self.toast_manager,
+            self.window_manager
+        )
+        
+        self.day_chat_window = DayChatWindow(
+            self.toast_manager,
+            self.window_manager
+        )
+        
         # Đăng ký các cửa sổ
         self.window_manager.register_window("welcome", self.welcome_window)
         self.window_manager.register_window("register", self.register_window)
         self.window_manager.register_window("login", self.login_window)
         self.window_manager.register_window("lobby", self.lobby_window)
         self.window_manager.register_window("room", self.room_window)
+        self.window_manager.register_window("role_card", self.role_card_window)
+        self.window_manager.register_window("night_begin", self.night_begin_window)
+        self.window_manager.register_window("death_announcement", self.death_announcement_window)
+        self.window_manager.register_window("day_chat", self.day_chat_window)
         
         # Kết nối cleanup
         self.app.aboutToQuit.connect(self.cleanup)

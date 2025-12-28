@@ -225,9 +225,13 @@ int main() {
         }
 
         time_t now = time(NULL);
-        if (now - last_check >= 10) {
+        if (now - last_check >= 1) {  // Check every second for phase timeouts
             send_ping_to_all_clients();
             check_timeouts();
+            check_role_card_timeouts();
+            check_seer_phase_timeout();  // Check seer deadline
+            check_guard_phase_timeout(); // Check guard deadline
+            check_wolf_phase_timeout();  // Check wolf deadline and process votes
             last_check = now;
         }
 

@@ -184,7 +184,17 @@ class RegisterWindow(QtWidgets.QWidget):
 
             print(f"[DEBUG] Register window received packet: header={header}, payload={payload}")
             self.handle_packet(header, payload)
-
+            
+        except RuntimeError as e:
+            error_msg = str(e)
+            print(f"[ERROR] Receive error in register window: {error_msg}")
+            # Kiểm tra xem có phải server disconnect không
+            if "Server closed" in error_msg or "Receive failed" in error_msg:
+                print(f"[ERROR] Server disconnected: {error_msg}")
+                self.handle_server_disconnect()
+            else:
+                self.toast_manager.error(f"Receive error: {error_msg}")
+                self.recv_timer.stop()
         except ConnectionError as e:
             # Connection lost detected
             print(f"[DEBUG] Connection lost: {e}")
@@ -195,7 +205,6 @@ class RegisterWindow(QtWidgets.QWidget):
                 self.connection_monitor.is_connected = False
                 self.connection_monitor.stop()
                 self.connection_monitor.handle_connection_lost()
-
         except Exception as e:
             # Other errors
             error_msg = str(e)
@@ -203,20 +212,44 @@ class RegisterWindow(QtWidgets.QWidget):
             self.toast_manager.error(f"Receive error: {error_msg}")
             self.recv_timer.stop()
             
+    def handle_server_disconnect(self):
+        """Xử lý khi server disconnect"""
+        print("[DEBUG] Handling server disconnect...")
+        # Dừng receive timer
+        self.recv_timer.stop()
+        
+        # Hiển thị thông báo
+        self.toast_manager.error("⚠️ Server disconnected! Returning to welcome screen...")
+        
+        # Cleanup network client
+        try:
+            if self.network_client:
+                self.network_client.disconnect()
+                self.network_client.destroy()
+        except Exception as e:
+            print(f"[ERROR] Error during cleanup: {e}")
+        
+        # Clear shared data
+        self.window_manager.set_shared_data("network_client", None)
+        
+        # Navigate về welcome screen
+        self.window_manager.navigate_to("welcome")
+            
     def handle_packet(self, header, payload):
         """Xử lý gói tin nhận được"""
+        print(f"[DEBUG] Register handle_packet: header={header}, payload={payload}")
         # Handle PING from server
         if header == 501:  # PING
             try:
-                self.network_client.send_packet(501, {"type": "pong"})
+                self.network_client.send_packet(502, {"type": "pong"})  # 502 = PONG
                 if self.connection_monitor:
                     self.connection_monitor.on_pong_received()
-            except:
-                pass
+            except Exception as e:
+                print(f"[ERROR] Failed to send PONG: {e}")
             return
-
-        print(f"[DEBUG] Register handle_packet: header={header}, payload={payload}")
-        if header == 104:  # REGISTER_RES
+        elif header == 502:  # PONG - Server trả về PONG (không cần xử lý)
+            pass
+        elif header == 104:  # REGISTER_RES
             if payload.get("status") == "success":
                 # Lấy username từ input vì server không gửi lại
                 username = self.username_input.text().strip()

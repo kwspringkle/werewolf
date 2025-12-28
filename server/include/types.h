@@ -40,6 +40,22 @@ struct Room {
     int current_players;
     int status;          // RoomStatus enum
     int host_socket;
+    /* Night-phase state */
+    int night_phase_active;      // 1 if night actions are being collected
+    time_t seer_deadline;        // deadline for seer to act (epoch seconds)
+    time_t guard_deadline;       // deadline for guard to act (epoch seconds)
+    time_t wolf_deadline;        // deadline for wolf to act (epoch seconds)
+    int seer_choice_made;        // 1 if seer has already chosen this night
+    char seer_chosen_target[50]; // username chosen by seer
+    int guard_choice_made;       // 1 if guard has already chosen this night
+    char guard_protected_username[50]; // username được bảo vệ bởi guard
+    char wolf_votes[MAX_PLAYERS_PER_ROOM][50]; // username bị mỗi sói chọn ("" nếu chưa vote)
+    int wolf_vote_count; // số lượng sói đã vote đêm nay
+    int wolf_kill_done; // 1 nếu đã tổng hợp và xử lý kill đêm nay
+    /* Role card reading phase */
+    int role_card_done_count; // số người đã đọc xong role card
+    int role_card_total; // tổng số người chơi
+    time_t role_card_start_time; // thời gian bắt đầu đọc role card (để timeout sau 30s)
 };
 
 // Room status enum

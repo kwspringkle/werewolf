@@ -24,19 +24,19 @@ class WindowManager(QtCore.QObject):
     def register_window(self, name, window_instance):
         """Đăng ký một cửa sổ"""
         self.windows[name] = window_instance
-        
+    
     def navigate_to(self, window_name, data=None):
-        """Điều hướng đến một cửa sổ cụ thể"""
+        """Điều hướng đến một cửa sổ cụ thể (giữ nguyên vị trí, không cascade)"""
         if window_name not in self.windows:
             raise ValueError(f"Window '{window_name}' not registered")
             
         # Lưu vị trí của cửa sổ hiện tại trước khi ẩn
+        saved_x = None
+        saved_y = None
         if self.current_window:
             current = self.windows[self.current_window]
-            if self.window_position_set:
-                # Lưu vị trí hiện tại
-                WindowManager.DEFAULT_X = current.x()
-                WindowManager.DEFAULT_Y = current.y()
+            saved_x = current.x()
+            saved_y = current.y()
             current.hide()
             
         # Hiển thị cửa sổ mới
@@ -49,17 +49,16 @@ class WindowManager(QtCore.QObject):
         # Set kích thước nhất quán
         new_window.resize(WindowManager.DEFAULT_WIDTH, WindowManager.DEFAULT_HEIGHT)
         
-        # Set vị trí
-        if WindowManager.DEFAULT_X is not None and WindowManager.DEFAULT_Y is not None:
-            new_window.move(WindowManager.DEFAULT_X, WindowManager.DEFAULT_Y)
+        # Set vị trí: giữ nguyên vị trí nếu có, nếu không thì center màn hình lần đầu
+        if saved_x is not None and saved_y is not None:
+            # Giữ nguyên vị trí từ window trước
+            new_window.move(saved_x, saved_y)
         elif not self.window_position_set:
-            # Center window on first show
+            # Lần đầu tiên: center màn hình
             screen = QtWidgets.QApplication.desktop().screenGeometry()
             x = (screen.width() - WindowManager.DEFAULT_WIDTH) // 2
             y = (screen.height() - WindowManager.DEFAULT_HEIGHT) // 2
             new_window.move(x, y)
-            WindowManager.DEFAULT_X = x
-            WindowManager.DEFAULT_Y = y
             self.window_position_set = True
         
         # Đảm bảo window flags cho phép nhận input

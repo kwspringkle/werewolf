@@ -1,10 +1,176 @@
+
 #include <stdio.h>
+#include <stdlib.h>    // for free
+#include <string.h>    // for strcmp, strncpy
+#include <time.h>      // for time_t, time
 #include "role_handlers/guard_handler.h"
 #include "cJSON.h"
+#include "protocol.h" // for GUARD_PROTECT_RES
+#include "types.h"     // for MAX_ROOMS, Player, Room, ROLE_GUARD
+#include "room_manager.h" // for rooms array
+
+#define WOLF_PHASE_DURATION 30
+
 
 void guard_get_info(int room_index, int player_index, cJSON *info_obj) {
     cJSON_AddStringToObject(info_obj, "role_name", "Guard");
     cJSON_AddStringToObject(info_obj, "role_icon", "🛡️");
     cJSON_AddStringToObject(info_obj, "role_description",
         "You are the GUARD! Each night, you can protect one player from werewolf attacks. Choose wisely to save the village.");
+}
+
+// Xử lý phần gửi tin của role bảo vệ
+void guard_handle_packet(int client_fd, cJSON *json) {
+    cJSON *response = cJSON_CreateObject();
+
+    cJSON *room_id_obj = cJSON_GetObjectItemCaseSensitive(json, "room_id");
+    cJSON *target_obj = cJSON_GetObjectItemCaseSensitive(json, "target_username");
+
+    if (!room_id_obj || !cJSON_IsNumber(room_id_obj) || !target_obj || !cJSON_IsString(target_obj)) {
+        cJSON_AddStringToObject(response, "status", "fail");
+        cJSON_AddStringToObject(response, "message", "Invalid or missing room_id/target_username");
+        char *res_str = cJSON_PrintUnformatted(response);
+        send_packet(client_fd, GUARD_PROTECT_RES, res_str);
+        free(res_str);
+        cJSON_Delete(response);
+        return;
+    }
+
+    int room_id = room_id_obj->valueint;
+    int room_index = -1;
+    for (int i = 0; i < MAX_ROOMS; i++) {
+        if (rooms[i].id == room_id) {
+            room_index = i;
+            break;
+        }
+    }
+
+    if (room_index == -1) {
+        cJSON_AddStringToObject(response, "status", "fail");
+        cJSON_AddStringToObject(response, "message", "Room not found");
+        char *res_str = cJSON_PrintUnformatted(response);
+        send_packet(client_fd, GUARD_PROTECT_RES, res_str);
+        free(res_str);
+        cJSON_Delete(response);
+        return;
+    }
+
+    // Tìm người đang gửi request
+    int requester_index = -1;
+    for (int i = 0; i < rooms[room_index].current_players; i++) {
+        if (rooms[room_index].players[i].socket == client_fd) {
+            requester_index = i;
+            break;
+        }
+    }
+
+    if (requester_index == -1) {
+        cJSON_AddStringToObject(response, "status", "fail");
+        cJSON_AddStringToObject(response, "message", "You are not in this room");
+        char *res_str = cJSON_PrintUnformatted(response);
+        send_packet(client_fd, GUARD_PROTECT_RES, res_str);
+        free(res_str);
+        cJSON_Delete(response);
+        return;
+    }
+
+    // Gửi danh sách người chơi và trạng thái alive
+    cJSON *players_array = cJSON_AddArrayToObject(response, "players");
+    for (int i = 0; i < rooms[room_index].current_players; i++) {
+        cJSON *player_obj = cJSON_CreateObject();
+        cJSON_AddStringToObject(player_obj, "username", rooms[room_index].players[i].username);
+        cJSON_AddBoolToObject(player_obj, "is_alive", rooms[room_index].players[i].is_alive);
+        cJSON_AddItemToArray(players_array, player_obj);
+    }
+
+    // Gọi hàm xử lý chính
+    guard_handle_protect(room_index, requester_index, target_obj->valuestring, response);
+
+    char *res_str = cJSON_PrintUnformatted(response);
+    send_packet(client_fd, GUARD_PROTECT_RES, res_str);
+    free(res_str);
+    cJSON_Delete(response);
+}
+
+void guard_handle_protect(int room_index, int requester_index, const char *target_username, cJSON *response) {
+    if (room_index < 0 || room_index >= MAX_ROOMS) {
+        cJSON_AddStringToObject(response, "status", "fail");
+        cJSON_AddStringToObject(response, "message", "Invalid room index");
+        return;
+    }
+
+    if (requester_index < 0 || requester_index >= rooms[room_index].current_players) {
+        cJSON_AddStringToObject(response, "status", "fail");
+        cJSON_AddStringToObject(response, "message", "Requester not in room");
+        return;
+    }
+
+    Player *requester = &rooms[room_index].players[requester_index];
+    // Kiểm tra có còn sống không
+    if (!requester->is_alive || requester->role != ROLE_GUARD) {
+        cJSON_AddStringToObject(response, "status", "fail");
+        cJSON_AddStringToObject(response, "message", "You are not an alive Guard");
+        return;
+    }
+
+    // Chỉ khi đang ở trong ban đêm 
+    if (!rooms[room_index].night_phase_active) {
+        cJSON_AddStringToObject(response, "status", "fail");
+        cJSON_AddStringToObject(response, "message", "Night phase is not active");
+        return;
+    }
+
+    // Đảm bảo guard chưa chọn trong đêm nay
+    if (rooms[room_index].guard_choice_made) {
+        cJSON_AddStringToObject(response, "status", "fail");
+        cJSON_AddStringToObject(response, "message", "Guard has already made a choice this night");
+        return;
+    }
+
+    // Đảm bảo chưa quá deadline để chọn (dùng deadline riêng cho guard)
+    time_t now = time(NULL);
+    if (rooms[room_index].guard_deadline != 0 && now > rooms[room_index].guard_deadline) {
+        cJSON_AddStringToObject(response, "status", "fail");
+        cJSON_AddStringToObject(response, "message", "Guard selection window has expired");
+        return;
+    }
+
+    int target_index = -1;
+    for (int i = 0; i < rooms[room_index].current_players; i++) {
+        if (strcmp(rooms[room_index].players[i].username, target_username) == 0) {
+            target_index = i;
+            break;
+        }
+    }
+
+    if (target_index == -1) {
+        cJSON_AddStringToObject(response, "status", "fail");
+        cJSON_AddStringToObject(response, "message", "Target player not found");
+        return;
+    }
+
+    // Kiểm tra target còn sống không
+    if (!rooms[room_index].players[target_index].is_alive) {
+        cJSON_AddStringToObject(response, "status", "fail");
+        cJSON_AddStringToObject(response, "message", "Target is already dead");
+        return;
+    }
+
+    // Lưu lại lựa chọn của guard
+    rooms[room_index].guard_choice_made = 1;
+    strncpy(rooms[room_index].guard_protected_username, target_username, sizeof(rooms[room_index].guard_protected_username) - 1);
+    rooms[room_index].guard_protected_username[sizeof(rooms[room_index].guard_protected_username) - 1] = '\0';
+
+    cJSON_AddStringToObject(response, "status", "success");
+    cJSON_AddStringToObject(response, "target_username", target_username);
+    
+    // Báo tất cả client chuyển sang wolf phase
+    printf("[SERVER] Guard has made choice, broadcasting PHASE_WOLF_START to all players in room %d\n", rooms[room_index].id);
+    cJSON *wolf_notif = cJSON_CreateObject();
+    cJSON_AddStringToObject(wolf_notif, "type", "phase_wolf_start");
+    cJSON_AddNumberToObject(wolf_notif, "wolf_duration", WOLF_PHASE_DURATION);
+    char *wolf_notif_str = cJSON_PrintUnformatted(wolf_notif);
+    broadcast_room(room_index, PHASE_WOLF_START, wolf_notif_str);
+    free(wolf_notif_str);
+    cJSON_Delete(wolf_notif);
 }
