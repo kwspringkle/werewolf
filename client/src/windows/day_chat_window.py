@@ -23,18 +23,30 @@ class DayChatWindow(QtWidgets.QWidget):
     def showEvent(self, event):
         """Called when window is shown"""
         super().showEvent(event)
-        
+
         # Get shared data
         self.network_client = self.window_manager.get_shared_data("network_client")
         self.current_room_id = self.window_manager.get_shared_data("current_room_id")
         self.my_username = self.window_manager.get_shared_data("username")
-        
+
+        print(f"[DEBUG] DayChatWindow shown - network_client: {self.network_client is not None}, room_id: {self.current_room_id}, username: {self.my_username}")
+
         # Set username in header
         if self.my_username:
             self.user_header.set_username(self.my_username)
-        
+
         # Start receiving packets
         self.recv_timer.start(100)
+
+        # Add a welcome message to show chat is working
+        QtCore.QTimer.singleShot(100, lambda: self.append_message("System", "Day phase started. Discuss who might be a werewolf!"))
+
+        # Force focus on input box after window is shown
+        def set_input_focus():
+            print(f"[DEBUG] Setting focus on input box - enabled: {self.input_box.isEnabled()}, visible: {self.input_box.isVisible()}")
+            self.input_box.setFocus()
+            print(f"[DEBUG] Input box has focus: {self.input_box.hasFocus()}")
+        QtCore.QTimer.singleShot(200, set_input_focus)
         
     def hideEvent(self, event):
         """Called when window is hidden"""
@@ -107,6 +119,7 @@ class DayChatWindow(QtWidgets.QWidget):
         self.messages_area = QtWidgets.QScrollArea()
         self.messages_area.setWidgetResizable(True)
         self.messages_area.setFrameShape(QtWidgets.QFrame.StyledPanel)
+        self.messages_area.setMinimumHeight(300)  # Ensure chat area is visible
         self.messages_area.setStyleSheet("""
             QScrollArea {
                 background-color: #0f1a2e;
@@ -179,17 +192,33 @@ class DayChatWindow(QtWidgets.QWidget):
     def send_message(self):
         """Gửi tin nhắn chat"""
         msg = self.input_box.text().strip()
-        if not msg or not self.network_client or not self.current_room_id:
+
+        if not msg:
+            print("[DEBUG] Day chat: Empty message")
             return
-            
+
+        if not self.network_client:
+            print("[ERROR] Day chat: network_client is None!")
+            if self.toast_manager:
+                self.toast_manager.error("Network client not available")
+            return
+
+        if not self.current_room_id:
+            print("[ERROR] Day chat: current_room_id is None!")
+            if self.toast_manager:
+                self.toast_manager.error("Room ID not available")
+            return
+
         try:
             payload = {
                 "room_id": self.current_room_id,
                 "message": msg
             }
+            print(f"[DEBUG] Sending day chat message: {msg} to room {self.current_room_id}")
             self.network_client.send_packet(401, payload)  # CHAT_REQ
             self.input_box.clear()
         except Exception as e:
+            print(f"[ERROR] Failed to send day chat: {e}")
             if self.toast_manager:
                 self.toast_manager.error(f"Failed to send message: {str(e)}")
     
@@ -246,14 +275,16 @@ class DayChatWindow(QtWidgets.QWidget):
     def receive_packets(self):
         """Nhận gói tin từ server"""
         if not self.network_client:
+            print("[DEBUG] Day chat: network_client is None in receive_packets")
             return
-            
+
         try:
             header, payload = self.network_client.receive_packet()
-            
+
             if header is None:
                 return
-                
+
+            print(f"[DEBUG] Day chat received packet: header={header}, payload={payload}")
             self.handle_packet(header, payload)
             
         except RuntimeError as e:
@@ -275,16 +306,23 @@ class DayChatWindow(QtWidgets.QWidget):
         # Handle PING
         if header == 501:  # PING
             try:
-                self.network_client.send_packet(501, {"type": "pong"})
+                self.network_client.send_packet(502, {"type": "pong"})
             except:
                 pass
             return
         
         # Handle CHAT_BROADCAST
         if header == 402:  # CHAT_BROADCAST
-            username = payload.get("username", "Unknown")
-            message = payload.get("message", "")
-            self.append_message(username, message)
+            chat_type = payload.get("chat_type", "day")
+            print(f"[DEBUG] Day chat received CHAT_BROADCAST with type: {chat_type}")
+            # Only show day chat messages, ignore wolf chat
+            if chat_type == "day":
+                username = payload.get("username", "Unknown")
+                message = payload.get("message", "")
+                print(f"[DEBUG] Day chat displaying message from {username}: {message}")
+                self.append_message(username, message)
+            else:
+                print(f"[DEBUG] Day chat ignoring {chat_type} message")
             return
     
     def on_logout(self):
