@@ -13,6 +13,7 @@
 #include "role_handlers/seer_handler.h"
 #include "role_handlers/werewolf_handler.h"
 #include "role_handlers/guard_handler.h"
+#include "chat_handler.h"
 #include "protocol.h"
 #include "cJSON.h"
 
@@ -931,6 +932,9 @@ void process_packet(int client_fd, uint16_t header, const char *payload) {
         case ROLE_CARD_DONE_REQ: // 310
             printf("[SERVER] Received ROLE_CARD_DONE_REQ (310) from client %d\n", client_fd);
             handle_role_card_done(client_fd, json);
+            break;
+        case CHAT_REQ: // 401
+            handle_chat_message(client_fd, json);
             break;
         default:
             printf("Unknown packet header: %d\n", header);

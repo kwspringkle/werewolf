@@ -156,14 +156,14 @@ int ww_client_player_ready_send(WerewolfClient* c, int is_ready) {
     if (!c || !c->is_connected) return -1;
 
     char json[256];
-    int n = snprintf(json, sizeof(json), "{\"is_ready\":%s}", 
+    int n = snprintf(json, sizeof(json), "{\"is_ready\":%s}",
                      is_ready ? "true" : "false");
     if (n < 0 || n >= (int)sizeof(json)) {
         set_error(c, "Player ready JSON too large");
         return -1;
     }
 
-    return ww_client_send(c, PLAYER_READY_REQ, json);
+    return ww_client_send(c, ROLE_CARD_DONE_REQ, json);
 }
 
 int ww_client_seer_check_send(WerewolfClient* c, int room_id, const char* target_username) {

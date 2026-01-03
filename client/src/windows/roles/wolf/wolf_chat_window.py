@@ -2,7 +2,7 @@ from PyQt5 import QtWidgets, QtCore
 
 class WolfChatWindow(QtWidgets.QWidget):
     """Styled wolf chat (card-like, timer)"""
-    def __init__(self, my_username, wolf_usernames, send_callback=None, duration_seconds=30, parent=None):
+    def __init__(self, my_username, wolf_usernames, send_callback=None, duration_seconds=30, network_client=None, room_id=None, parent=None):
         super().__init__(parent)
         self.setObjectName("wolf_chat_window")
         self.setWindowTitle("Wolf Chat")
@@ -13,8 +13,11 @@ class WolfChatWindow(QtWidgets.QWidget):
         self.wolf_usernames = wolf_usernames
         self.duration = duration_seconds
         self.remaining = duration_seconds
+        self.network_client = network_client
+        self.room_id = room_id
         self.setup_ui()
         self.start_timer()
+        self.start_receive_timer()
 
     def setup_ui(self):
         main_layout = QtWidgets.QVBoxLayout(self)
@@ -153,10 +156,15 @@ class WolfChatWindow(QtWidgets.QWidget):
     def send_message(self):
         msg = self.input_box.text().strip()
         if msg:
-            if self.send_callback:
-                self.send_callback(msg)
-            self.append_message(self.my_username, msg)
-            self.input_box.clear()
+            try:
+                if self.send_callback:
+                    self.send_callback(msg)
+                # Don't append here - wait for server CHAT_BROADCAST to avoid duplicates
+                self.input_box.clear()
+            except Exception as e:
+                print(f"[ERROR] Wolf chat send_message failed: {e}")
+                import traceback
+                traceback.print_exc()
 
     def append_message(self, username, msg):
         # Add a message widget into the messages container (left for others, right for self)
@@ -209,7 +217,59 @@ class WolfChatWindow(QtWidgets.QWidget):
         # Auto-scroll to bottom
         QtCore.QTimer.singleShot(50, lambda: self.messages_area.verticalScrollBar().setValue(self.messages_area.verticalScrollBar().maximum()))
 
+    def start_receive_timer(self):
+        """Start timer to receive chat messages from server"""
+        if self.network_client:
+            self.recv_timer = QtCore.QTimer(self)
+            self.recv_timer.timeout.connect(self.receive_packets)
+            self.recv_timer.start(100)  # Check every 100ms
+
+    def receive_packets(self):
+        """Receive and handle packets from server"""
+        if not self.network_client:
+            return
+
+        # Process ALL available packets in buffer (not just one)
+        max_packets_per_tick = 10  # Prevent infinite loop
+        packets_processed = 0
+
+        while packets_processed < max_packets_per_tick:
+            try:
+                header, payload = self.network_client.receive_packet()
+                if header is None:
+                    break  # No more packets available
+
+                packets_processed += 1
+
+                # Handle CHAT_BROADCAST
+                if header == 402:  # CHAT_BROADCAST
+                    chat_type = payload.get("chat_type", "day")
+                    # Only show wolf chat messages, ignore day chat
+                    if chat_type == "wolf":
+                        username = payload.get("username", "Unknown")
+                        message = payload.get("message", "")
+                        # Only show wolf messages (from wolves in this room)
+                        if username in self.wolf_usernames or username == self.my_username:
+                            self.append_message(username, message)
+                            print(f"[DEBUG] Wolf chat received: {username}: {message}")
+
+                # Handle PING
+                elif header == 501:
+                    try:
+                        self.network_client.send_packet(502, {"type": "pong"})
+                    except:
+                        pass
+
+            except RuntimeError as e:
+                # Ignore errors during chat (server might disconnect during phase transition)
+                break
+            except Exception as e:
+                print(f"[ERROR] Wolf chat receive error: {e}")
+                break
+
     def closeEvent(self, event):
         if hasattr(self, 'timer'):
             self.timer.stop()
+        if hasattr(self, 'recv_timer'):
+            self.recv_timer.stop()
         event.accept()

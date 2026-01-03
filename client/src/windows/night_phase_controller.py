@@ -269,7 +269,25 @@ class NightPhaseController:
             self.wolf_chat_window = None
             def show_chat():
                 if not self.wolf_chat_window:
-                    self.wolf_chat_window = WolfChatWindow(self.my_username, self.wolf_usernames)
+                    # Create send callback for wolf chat
+                    def send_wolf_chat(message):
+                        try:
+                            if self.network_client and self.room_id:
+                                payload = {
+                                    "room_id": self.room_id,
+                                    "message": message
+                                }
+                                self.network_client.send_packet(401, payload)  # CHAT_REQ
+                                print(f"[DEBUG] Sent wolf chat: {message}")
+                        except Exception as e:
+                            print(f"[ERROR] Failed to send wolf chat: {e}")
+
+                    self.wolf_chat_window = WolfChatWindow(
+                        self.my_username, self.wolf_usernames,
+                        send_callback=send_wolf_chat,
+                        network_client=self.network_client,
+                        room_id=self.room_id
+                    )
                     self.wolf_chat_window.setWindowModality(QtCore.Qt.ApplicationModal)
                     # Center chat window
                     screen = QtWidgets.QApplication.desktop().screenGeometry()

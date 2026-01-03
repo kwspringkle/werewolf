@@ -9,6 +9,7 @@ INC_DIR = include
 SOURCES = $(SRC_DIR)/main.c $(SRC_DIR)/cJSON.c $(SRC_DIR)/database.c \
           $(SRC_DIR)/room_manager.c $(SRC_DIR)/session_manager.c \
           $(SRC_DIR)/packet_handler.c $(SRC_DIR)/role_manager.c \
+          $(SRC_DIR)/chat_handler.c \
           $(SRC_DIR)/role_handlers/werewolf_handler.c \
           $(SRC_DIR)/role_handlers/seer_handler.c \
           $(SRC_DIR)/role_handlers/guard_handler.c \

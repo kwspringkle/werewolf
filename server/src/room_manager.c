@@ -38,6 +38,7 @@ void start_night_phase(int room_index, int duration_seconds) {
     if (room_index < 0 || room_index >= MAX_ROOMS) return;
 
     rooms[room_index].night_phase_active = 1;
+    rooms[room_index].role_card_start_time = 0; // Reset to prevent timeout check from triggering again
     time_t now = time(NULL);
     
     // Tính deadline cho từng phase: seer -> guard -> wolf (tuần tự)

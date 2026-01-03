@@ -21,18 +21,11 @@ static void count_wolf_votes(Room *room, int *vote_counts, int *max_votes, int *
 
 // Xử lý gói tin sói cắn
 void werewolf_handle_packet(int client_fd, cJSON *json) {
-    cJSON *response = cJSON_CreateObject();
-
     cJSON *room_id_obj = cJSON_GetObjectItemCaseSensitive(json, "room_id");
     cJSON *target_obj = cJSON_GetObjectItemCaseSensitive(json, "target_username");
 
     if (!room_id_obj || !cJSON_IsNumber(room_id_obj) || !target_obj || !cJSON_IsString(target_obj)) {
-        cJSON_AddStringToObject(response, "status", "fail");
-        cJSON_AddStringToObject(response, "message", "Invalid or missing room_id/target_username");
-        char *res_str = cJSON_PrintUnformatted(response);
-        send_packet(client_fd, WOLF_KILL_RES, res_str);
-        free(res_str);
-        cJSON_Delete(response);
+        printf("[SERVER] Wolf kill request missing room_id or target_username\n");
         return;
     }
 
@@ -46,12 +39,7 @@ void werewolf_handle_packet(int client_fd, cJSON *json) {
     }
 
     if (room_index == -1) {
-        cJSON_AddStringToObject(response, "status", "fail");
-        cJSON_AddStringToObject(response, "message", "Room not found");
-        char *res_str = cJSON_PrintUnformatted(response);
-        send_packet(client_fd, WOLF_KILL_RES, res_str);
-        free(res_str);
-        cJSON_Delete(response);
+        printf("[SERVER] Wolf kill request: room %d not found\n", room_id);
         return;
     }
 
@@ -65,55 +53,27 @@ void werewolf_handle_packet(int client_fd, cJSON *json) {
     }
 
     if (requester_index == -1) {
-        cJSON_AddStringToObject(response, "status", "fail");
-        cJSON_AddStringToObject(response, "message", "You are not in this room");
-        char *res_str = cJSON_PrintUnformatted(response);
-        send_packet(client_fd, WOLF_KILL_RES, res_str);
-        free(res_str);
-        cJSON_Delete(response);
+        printf("[SERVER] Wolf kill request: sender not in room %d\n", room_id);
         return;
-    }
-
-    // Gửi danh sách người chơi và trạng thái alive
-    cJSON *players_array = cJSON_AddArrayToObject(response, "players");
-    for (int i = 0; i < rooms[room_index].current_players; i++) {
-        cJSON *player_obj = cJSON_CreateObject();
-        cJSON_AddStringToObject(player_obj, "username", rooms[room_index].players[i].username);
-        cJSON_AddBoolToObject(player_obj, "is_alive", rooms[room_index].players[i].is_alive);
-        cJSON_AddItemToArray(players_array, player_obj);
     }
 
     Player *requester = &rooms[room_index].players[requester_index];
     if (!requester->is_alive || requester->role != ROLE_WEREWOLF) {
-        cJSON_AddStringToObject(response, "status", "fail");
-        cJSON_AddStringToObject(response, "message", "You are not an alive Werewolf");
-        char *res_str = cJSON_PrintUnformatted(response);
-        send_packet(client_fd, WOLF_KILL_RES, res_str);
-        free(res_str);
-        cJSON_Delete(response);
+        printf("[SERVER] Wolf kill request from non-wolf or dead player: %s\n", requester->username);
         return;
     }
-    // Chỉ khi đang ở trong ban đêm
+
     if (!rooms[room_index].night_phase_active) {
-        cJSON_AddStringToObject(response, "status", "fail");
-        cJSON_AddStringToObject(response, "message", "Night phase is not active");
-        char *res_str = cJSON_PrintUnformatted(response);
-        send_packet(client_fd, WOLF_KILL_RES, res_str);
-        free(res_str);
-        cJSON_Delete(response);
+        printf("[SERVER] Wolf kill request when night phase not active\n");
         return;
     }
-    // Đảm bảo chưa quá deadline
+
     time_t now = time(NULL);
     if (rooms[room_index].wolf_deadline != 0 && now > rooms[room_index].wolf_deadline) {
-        cJSON_AddStringToObject(response, "status", "fail");
-        cJSON_AddStringToObject(response, "message", "Werewolf selection window has expired");
-        char *res_str = cJSON_PrintUnformatted(response);
-        send_packet(client_fd, WOLF_KILL_RES, res_str);
-        free(res_str);
-        cJSON_Delete(response);
+        printf("[SERVER] Wolf kill request after deadline\n");
         return;
     }
+
     // Kiểm tra target còn sống không
     int target_index = -1;
     for (int i = 0; i < rooms[room_index].current_players; i++) {
@@ -122,29 +82,21 @@ void werewolf_handle_packet(int client_fd, cJSON *json) {
         }
     }
     if (target_index == -1) {
-        cJSON_AddStringToObject(response, "status", "fail");
-        cJSON_AddStringToObject(response, "message", "Target player not found");
-        char *res_str = cJSON_PrintUnformatted(response);
-        send_packet(client_fd, WOLF_KILL_RES, res_str);
-        free(res_str);
-        cJSON_Delete(response);
+        printf("[SERVER] Wolf kill request: target %s not found\n", target_obj->valuestring);
         return;
     }
     if (!rooms[room_index].players[target_index].is_alive) {
-        cJSON_AddStringToObject(response, "status", "fail");
-        cJSON_AddStringToObject(response, "message", "Target is already dead");
-        char *res_str = cJSON_PrintUnformatted(response);
-        send_packet(client_fd, WOLF_KILL_RES, res_str);
-        free(res_str);
-        cJSON_Delete(response);
+        printf("[SERVER] Wolf kill request: target %s already dead\n", target_obj->valuestring);
         return;
     }
+
     // Lưu lại vote của sói
     int n = rooms[room_index].current_players;
     int wolf_index = requester_index;
-    // Lưu username mục tiêu vào mảng vote
     strncpy(rooms[room_index].wolf_votes[wolf_index], rooms[room_index].players[target_index].username, 49);
     rooms[room_index].wolf_votes[wolf_index][49] = '\0';
+
+    printf("[SERVER] Wolf %s voted to kill %s\n", requester->username, target_obj->valuestring);
 
     // Đếm số sói còn sống
     int alive_wolves = 0;
@@ -161,12 +113,7 @@ void werewolf_handle_packet(int client_fd, cJSON *json) {
     }
     rooms[room_index].wolf_vote_count = wolf_vote_count;
 
-    cJSON_AddStringToObject(response, "status", "success");
-    cJSON_AddStringToObject(response, "target_username", target_obj->valuestring);
-    char *res_str = cJSON_PrintUnformatted(response);
-    send_packet(client_fd, WOLF_KILL_RES, res_str);
-    free(res_str);
-    cJSON_Delete(response);
+    // NO RESPONSE SENT - client doesn't handle WOLF_KILL_RES
 
     // Nếu tất cả sói còn sống đã vote, tổng hợp kết quả
     if (wolf_vote_count == alive_wolves && !rooms[room_index].wolf_kill_done) {
