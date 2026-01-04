@@ -185,6 +185,8 @@ class WelcomeWindow(QtWidgets.QWidget):
             
             # Store connection info
             self.window_manager.set_shared_data("network_client", self.network_client)
+            self.window_manager.set_shared_data("server_host", host)
+            self.window_manager.set_shared_data("server_port", port)
             self.window_manager.set_shared_data("connected", True)
             self.is_connected = True
             
@@ -199,19 +201,3 @@ class WelcomeWindow(QtWidgets.QWidget):
     def on_login(self):
         """Điều hướng đến màn hình đăng nhập"""
         self.window_manager.navigate_to("login")
-    
-    def closeEvent(self, event):
-        """Handle khi user ấn X để đóng window - disconnect và cleanup"""
-        print("[DEBUG] Welcome window closing, cleaning up...")
-        try:
-            # Trigger cleanup giống như Ctrl+C
-            if hasattr(self, 'network_client') and self.network_client:
-                self.network_client.disconnect()
-                self.network_client.destroy()
-        except Exception as e:
-            print(f"[ERROR] Error during welcome window cleanup: {e}")
-        
-        # Accept close event để window đóng và app thoát
-        event.accept()
-        # Quit application
-        QtWidgets.QApplication.instance().quit()

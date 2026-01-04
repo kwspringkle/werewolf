@@ -8,9 +8,9 @@ class DeathAnnouncementWindow(QtWidgets.QWidget):
     """Window hiển thị danh sách người chết sau đêm (10 giây)"""
     def __init__(self, toast_manager=None, window_manager=None):
         super().__init__()
-        # WindowManager should not override size/flags for this in-game overlay screen.
-        self.use_default_size = False
-        self.preserve_window_flags = True
+        # Normal window (movable, consistent sizing via WindowManager)
+        self.use_default_size = True
+        self.preserve_window_flags = False
         self.toast_manager = toast_manager
         self.window_manager = window_manager
         self.duration = 10
@@ -19,19 +19,12 @@ class DeathAnnouncementWindow(QtWidgets.QWidget):
         self.dead_players = []  # List of usernames who died
         self.setObjectName("death_announcement_window")
         self.setWindowTitle("Night Results")
-        self.setFixedSize(600, 500)
-        self.setWindowFlags(QtCore.Qt.Window | QtCore.Qt.FramelessWindowHint)
         self.setup_ui()
         
     def set_dead_players(self, dead_players):
         """Set danh sách người chết và cập nhật UI"""
-        print(f"[DEBUG] DeathAnnouncementWindow.set_dead_players called with: {dead_players}")
-        self.dead_players = dead_players if dead_players else []
-        # Update ngay nếu UI đã được setup
-        if hasattr(self, 'death_list_label'):
-            self.update_death_list()
-        else:
-            print("[DEBUG] UI not ready yet, will update in showEvent")
+        self.dead_players = dead_players
+        self.update_death_list()
         
     def showEvent(self, event):
         """Called when window is shown"""
@@ -41,11 +34,6 @@ class DeathAnnouncementWindow(QtWidgets.QWidget):
         self.user_header.set_username(username)
         self.remaining = self.duration
         self.timer_label.setText(f"⏱️ {self.remaining}s")
-        
-        # Update death list khi window được show
-        print(f"[DEBUG] DeathAnnouncementWindow.showEvent - dead_players: {self.dead_players}")
-        self.update_death_list()
-        
         self.start_timer()
         
     def setup_ui(self):
@@ -126,21 +114,17 @@ class DeathAnnouncementWindow(QtWidgets.QWidget):
         
         card_layout.addWidget(self.death_list_container)
 
-        print(f"[DEBUG] update_death_list called - dead_players: {self.dead_players}")
-        
-        if not self.dead_players or len(self.dead_players) == 0:
+        card_layout.addStretch()
+        main_layout.addWidget(card)
+
+    def update_death_list(self):
+        """Cập nhật danh sách người chết"""
+        if not self.dead_players:
             self.death_list_label.setText("No one died last night.")
             self.death_list_label.setStyleSheet("""
                 font-size: 24px;
                 color: #2ecc71;
                 font-weight: bold;
-                padding: 20px;
-            """)
-            print("[DEBUG] No deaths - showing 'No one died' message")
-        else:
-            # Hiển thị danh sách người chết
-            death_text = "\n".join([f"💀 {username}" for username in self.dead_players])
-            print(f"[DEBUG] Deaths detected - showing: {death_text}"
                 padding: 20px;
             """)
         else:
@@ -192,7 +176,7 @@ class DeathAnnouncementWindow(QtWidgets.QWidget):
         if reply == QtWidgets.QMessageBox.Yes:
             try:
                 # Send logout request
-                network_client = self.window_manager.get_shared_data("network_client")
+                network_client = self.window_manager.get_shared_data("network_client") if self.window_manager else None
                 if network_client:
                     network_client.send_packet(105, {})  # LOGOUT_REQ
                 if self.toast_manager:
@@ -203,14 +187,16 @@ class DeathAnnouncementWindow(QtWidgets.QWidget):
                     self.timer.stop()
                 
                 # Clear shared data
-                self.window_manager.set_shared_data("user_id", None)
-                self.window_manager.set_shared_data("username", None)
-                self.window_manager.set_shared_data("current_room_id", None)
-                self.window_manager.set_shared_data("is_host", False)
-                self.window_manager.set_shared_data("connected", False)
-
-                # Navigate to welcome screen
-                self.window_manager.navigate_to("welcome")
+                if self.window_manager:
+                    self.window_manager.set_shared_data("user_id", None)
+                    self.window_manager.set_shared_data("username", None)
+                    self.window_manager.set_shared_data("current_room_id", None)
+                    self.window_manager.set_shared_data("is_host", False)
+                    self.window_manager.set_shared_data("connected", False)
+                    # Navigate to welcome screen
+                    self.window_manager.navigate_to("welcome")
+                else:
+                    self.close()
 
             except Exception as e:
                 if self.toast_manager:

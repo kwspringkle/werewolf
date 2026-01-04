@@ -238,18 +238,18 @@ class LobbyWindow(QtWidgets.QWidget):
         # Hiển thị thông báo
         self.toast_manager.error("⚠️ Server disconnected! Returning to welcome screen...")
         
-        # Cleanup network client
+        # Mark disconnected but keep client instance so Welcome/ConnectionMonitor can reconnect
+        self.window_manager.set_shared_data("connected", False)
         try:
             if self.network_client:
                 self.network_client.disconnect()
-                self.network_client.destroy()
         except Exception as e:
-            print(f"[ERROR] Error during cleanup: {e}")
+            print(f"[ERROR] Error during disconnect: {e}")
         
         # Clear shared data
         self.window_manager.set_shared_data("user_id", None)
         self.window_manager.set_shared_data("username", None)
-        self.window_manager.set_shared_data("network_client", None)
+        # Keep shared network_client instance (no None) to avoid NoneType in login/register
         
         # Navigate về welcome screen
         self.window_manager.navigate_to("welcome")
@@ -280,7 +280,10 @@ class LobbyWindow(QtWidgets.QWidget):
                 # Lưu dữ liệu phòng và chuyển hướng
                 self.window_manager.set_shared_data("current_room_id", room_id)
                 self.window_manager.set_shared_data("current_room_name", room_name)
+                self.window_manager.set_shared_data("last_room_id", room_id)
+                self.window_manager.set_shared_data("last_room_name", room_name)
                 self.window_manager.set_shared_data("is_host", True)
+                self.window_manager.set_shared_data("spectator_mode", False)
                 # Creator is first player, so initial count is 1
                 username = self.window_manager.get_shared_data("username")
                 self.window_manager.set_shared_data("room_players", [{"username": username}])
@@ -301,7 +304,10 @@ class LobbyWindow(QtWidgets.QWidget):
                 # Lưu dữ liệu phòng và chuyển hướng
                 self.window_manager.set_shared_data("current_room_id", room_id)
                 self.window_manager.set_shared_data("current_room_name", room_name)
+                self.window_manager.set_shared_data("last_room_id", room_id)
+                self.window_manager.set_shared_data("last_room_name", room_name)
                 self.window_manager.set_shared_data("is_host", is_host)
+                self.window_manager.set_shared_data("spectator_mode", False)
                 self.window_manager.set_shared_data("room_players", payload.get("players", []))
                 
                 self.window_manager.navigate_to("room")
@@ -478,23 +484,3 @@ class LobbyWindow(QtWidgets.QWidget):
 
             except Exception as e:
                 self.toast_manager.error(f"Logout error: {str(e)}")
-    
-    def closeEvent(self, event):
-        """Xử lý khi đóng cửa sổ - cleanup network client"""
-        self.recv_timer.stop()
-        self.auto_refresh_timer.stop()
-        if self.connection_monitor:
-            self.connection_monitor.stop()
-        
-        # Cleanup network client giống như Ctrl+C
-        print("[DEBUG] Lobby window closing, cleaning up...")
-        try:
-            if self.network_client:
-                self.network_client.disconnect()
-                self.network_client.destroy()
-        except Exception as e:
-            print(f"[ERROR] Error during lobby cleanup: {e}")
-        
-        event.accept()
-        # Quit application
-        QtWidgets.QApplication.instance().quit()

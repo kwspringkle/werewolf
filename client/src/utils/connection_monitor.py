@@ -94,6 +94,11 @@ class ConnectionMonitor(QtCore.QObject):
             self.network_client.create()
             self.network_client.connect(host, port)
 
+            # Lưu giữ trạng thái kết nối cho các luồng giao diện người dùng (UI).
+            if self.window_manager:
+                self.window_manager.set_shared_data("network_client", self.network_client)
+                self.window_manager.set_shared_data("connected", True)
+
             self.is_connected = True
             self.last_pong_time = time.time()
             self.reconnect_attempts = 0  # Reset counter
@@ -101,10 +106,10 @@ class ConnectionMonitor(QtCore.QObject):
             # Show success message
             self.toast_manager.success("Reconnected to server!")
 
-            # Emit signal to restart timers
+            # Phát tín hiệu để khởi động lại các bộ hẹn giờ
             self.connection_restored.emit()
 
-            # Show info about re-login
+            # Hiển thị thông báo về việc đăng nhập lại
             self.toast_manager.warning("Please login again to continue")
             
         except Exception as e:
@@ -117,11 +122,13 @@ class ConnectionMonitor(QtCore.QObject):
     def return_to_welcome(self):
         """Quay về màn hình welcome"""
         self.stop()
+
+        if self.window_manager:
+            self.window_manager.set_shared_data("connected", False)
         
-        # Clear all shared data
         self.window_manager.set_shared_data("user_id", None)
         self.window_manager.set_shared_data("username", None)
         self.window_manager.set_shared_data("current_room_id", None)
         
-        # Navigate to welcome
+        # Navigate về welcome
         self.window_manager.navigate_to("welcome")

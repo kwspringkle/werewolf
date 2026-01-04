@@ -1,4 +1,5 @@
 from PyQt5 import QtWidgets, QtCore
+from components.user_header import UserHeader
 
 class WolfSelectWindow(QtWidgets.QWidget):
     """Wolf selection window: choose a living target to bite (UI-only selection until submit)."""
@@ -34,10 +35,12 @@ class WolfSelectWindow(QtWidgets.QWidget):
         duration_seconds=60,
         network_client=None,
         room_id=None,
+        can_vote: bool = True,
         parent=None,
+        window_manager=None,
+        toast_manager=None,
     ):
         super().__init__(parent)
-        # Regular window with standard controls
         self.use_default_size = True
         self.preserve_window_flags = False
         self.player_list = player_list
@@ -47,11 +50,13 @@ class WolfSelectWindow(QtWidgets.QWidget):
         self.remaining = duration_seconds
         self.network_client = network_client
         self.room_id = room_id
+        self.window_manager = window_manager
+        self.toast_manager = toast_manager
         self.selected_username = None
+        self.can_vote = bool(can_vote)
 
         self.setObjectName("wolf_select_window")
         self.setWindowTitle("Wolf — Choose a victim")
-        self.resize(500, 600)
         self.setup_ui()
         self.start_timer()
 
@@ -59,6 +64,11 @@ class WolfSelectWindow(QtWidgets.QWidget):
         main_layout = QtWidgets.QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
+
+        self.user_header = UserHeader(self)
+        self.user_header.set_username(self.my_username or "Player")
+        self.user_header.logout_clicked.connect(self.on_logout)
+        main_layout.addWidget(self.user_header)
 
         card = QtWidgets.QFrame()
         card.setObjectName("wolf_card")
@@ -95,6 +105,19 @@ class WolfSelectWindow(QtWidgets.QWidget):
         title_label.setStyleSheet("font-size: 20px; color: #e94560; font-weight: bold; margin-top: 4px;")
         header_v.addWidget(title_label, alignment=QtCore.Qt.AlignCenter)
 
+        self.dead_hint_label = QtWidgets.QLabel("You are dead. You cannot vote.")
+        self.dead_hint_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.dead_hint_label.setVisible(not self.can_vote)
+        self.dead_hint_label.setStyleSheet("""
+            font-size: 12px;
+            color: #f39c12;
+            background-color: rgba(243, 156, 18, 0.12);
+            padding: 6px;
+            border-radius: 6px;
+            margin-top: 6px;
+        """)
+        header_v.addWidget(self.dead_hint_label)
+
         self.card_layout.addLayout(header_v)
 
         # Grid of players (cards)
@@ -108,7 +131,11 @@ class WolfSelectWindow(QtWidgets.QWidget):
         row = 0
         col = 0
         for i, uname in enumerate(self.player_list):
-            is_alive = bool(self.alive_status[i]) if i < len(self.alive_status) else True
+            raw_alive = self.alive_status[i] if i < len(self.alive_status) else 1
+            try:
+                is_alive = int(raw_alive) != 0
+            except Exception:
+                is_alive = bool(raw_alive)
 
             card_item = QtWidgets.QFrame()
             card_item.setObjectName("user_card")
@@ -140,7 +167,7 @@ class WolfSelectWindow(QtWidgets.QWidget):
             name_label.setWordWrap(True)
             card_item_layout.addWidget(name_label)
 
-            if is_alive:
+            if is_alive and self.can_vote:
                 card_item.mousePressEvent = self._make_card_click(card_item, uname)
                 card_item.setCursor(QtCore.Qt.PointingHandCursor)
             else:
@@ -244,6 +271,40 @@ class WolfSelectWindow(QtWidgets.QWidget):
         self.card_layout.addStretch()
         main_layout.addWidget(card)
 
+    def on_logout(self):
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Logout",
+            "Are you sure you want to logout?",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No,
+        )
+        if reply != QtWidgets.QMessageBox.Yes:
+            return
+
+        try:
+            nc = self.network_client
+            if nc:
+                try:
+                    nc.send_packet(208, {})
+                except Exception:
+                    pass
+                try:
+                    nc.send_packet(105, {})
+                except Exception:
+                    pass
+            if self.window_manager:
+                self.window_manager.set_shared_data("user_id", None)
+                self.window_manager.set_shared_data("username", None)
+                self.window_manager.set_shared_data("current_room_id", None)
+                self.window_manager.set_shared_data("current_room_name", None)
+                self.window_manager.set_shared_data("is_host", False)
+                self.window_manager.set_shared_data("connected", False)
+                self.window_manager.navigate_to("welcome")
+        except Exception as e:
+            if self.toast_manager:
+                self.toast_manager.error(f"Logout error: {str(e)}")
+
     def start_timer(self):
         self.timer = QtCore.QTimer(self)
         self.timer.timeout.connect(self._tick)
@@ -276,6 +337,10 @@ class WolfSelectWindow(QtWidgets.QWidget):
         return self.selected_username
 
     def on_select(self):
+        if not self.can_vote:
+            if self.toast_manager:
+                self.toast_manager.warning("You are dead. You cannot vote.")
+            return
         target = self.selected_username
         if not target:
             QtWidgets.QMessageBox.warning(self, "Select player", "Please select a player to bite")

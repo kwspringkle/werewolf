@@ -11,6 +11,7 @@ class DayChatWindow(QtWidgets.QWidget):
         self.network_client = None
         self.current_room_id = None
         self.my_username = None
+        self.can_send_chat = True
         
         self.setObjectName("day_chat_window")
         self.setWindowTitle("Werewolf - Day Phase")
@@ -32,41 +33,51 @@ class DayChatWindow(QtWidgets.QWidget):
         # Set username in header
         if self.my_username:
             self.user_header.set_username(self.my_username)
-        
-        # Check if player is alive
-        players = self.window_manager.get_shared_data("room_players", [])
-        my_is_alive = True
-        for p in players:
-            if isinstance(p, dict):
-                if p.get("username") == self.my_username:
-                    my_is_alive = bool(p.get("is_alive", 1))
-                    break
-        
-        # Disable input if dead
-        if not my_is_alive:
-            self.input_box.setEnabled(False)
-            self.input_box.setPlaceholderText("❌ You cannot send messages since you are dead")
-            self.input_box.setStyleSheet("background:#333333; border:1px solid #555555; color:#888888; padding:8px; border-radius:8px;")
-            self.send_btn.setEnabled(False)
-            print(f"[DEBUG] Player {self.my_username} is dead - chat disabled")
-        else:
-            self.input_box.setEnabled(True)
-            self.input_box.setPlaceholderText("Type a message...")
-            self.input_box.setStyleSheet("background:#0f1a2e; border:1px solid #0f3460; color:#eaeaea; padding:8px; border-radius:8px;")
-            print(f"[DEBUG] Player {self.my_username} is alive - chat enabled")
+
+        # Update chat permissions (dead users can't send)
+        self.refresh_chat_permissions()
 
         # Packets are received by RoomWindow; this window only renders chat UI.
 
         # Add a welcome message to show chat is working
         QtCore.QTimer.singleShot(100, lambda: self.append_message("System", "Day phase started. Discuss who might be a werewolf!"))
 
-        # Force focus on input box after window is shown (only if alive)
-        if my_is_alive:
-            def set_input_focus():
-                print(f"[DEBUG] Setting focus on input box - enabled: {self.input_box.isEnabled()}, visible: {self.input_box.isVisible()}")
+        # Force focus on input box after window is shown
+        def set_input_focus():
+            print(f"[DEBUG] Setting focus on input box - enabled: {self.input_box.isEnabled()}, visible: {self.input_box.isVisible()}")
+            if self.can_send_chat:
                 self.input_box.setFocus()
-                print(f"[DEBUG] Input box has focus: {self.input_box.hasFocus()}")
-            QtCore.QTimer.singleShot(200, set_input_focus)
+            print(f"[DEBUG] Input box has focus: {self.input_box.hasFocus()}")
+        QtCore.QTimer.singleShot(200, set_input_focus)
+
+    def _is_me_alive(self) -> bool:
+        """Best-effort alive status based on shared room_players."""
+        if not self.window_manager or not self.my_username:
+            return True
+        players = self.window_manager.get_shared_data("room_players", [])
+        if not isinstance(players, list):
+            return True
+        for p in players:
+            if isinstance(p, dict) and p.get("username") == self.my_username:
+                raw = p.get("is_alive", 1)
+                try:
+                    return int(raw) != 0
+                except Exception:
+                    return bool(raw)
+        return True
+
+    def refresh_chat_permissions(self):
+        alive = self._is_me_alive()
+        self.can_send_chat = bool(alive)
+        if hasattr(self, "chat_hint_label"):
+            self.chat_hint_label.setVisible(not self.can_send_chat)
+        if hasattr(self, "input_box"):
+            self.input_box.setEnabled(self.can_send_chat)
+        if hasattr(self, "send_btn"):
+            if not self.can_send_chat:
+                self.send_btn.setEnabled(False)
+            else:
+                self.send_btn.setEnabled(bool(self.input_box.text().strip()))
         
     def hideEvent(self, event):
         """Called when window is hidden"""
@@ -167,6 +178,20 @@ class DayChatWindow(QtWidgets.QWidget):
         self.messages_layout.addStretch()
         self.messages_area.setWidget(self.messages_container)
         chat_layout.addWidget(self.messages_area, 1)
+
+        # Hint for dead users
+        self.chat_hint_label = QtWidgets.QLabel("You are dead. Cannot send message!")
+        self.chat_hint_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.chat_hint_label.setVisible(False)
+        self.chat_hint_label.setStyleSheet("""
+            font-size: 12px;
+            color: #f39c12;
+            background-color: rgba(243, 156, 18, 0.12);
+            padding: 6px;
+            border-radius: 6px;
+            margin-top: 6px;
+        """)
+        chat_layout.addWidget(self.chat_hint_label)
         
         # Input row
         input_layout = QtWidgets.QHBoxLayout()
@@ -214,7 +239,7 @@ class DayChatWindow(QtWidgets.QWidget):
         self.send_btn.setEnabled(False)
         self.send_btn.clicked.connect(self.send_message)
         input_layout.addWidget(self.send_btn)
-        self.input_box.textChanged.connect(lambda t: self.send_btn.setEnabled(bool(t.strip())))
+        self.input_box.textChanged.connect(lambda t: self.send_btn.setEnabled(bool(t.strip()) and self.can_send_chat))
         
         chat_layout.addLayout(input_layout)
         chat_group.setLayout(chat_layout)
@@ -222,6 +247,10 @@ class DayChatWindow(QtWidgets.QWidget):
         
     def send_message(self):
         """Gửi tin nhắn chat"""
+        if not self.can_send_chat:
+            if self.toast_manager:
+                self.toast_manager.warning("Bạn đã chết, không thể gửi tin nhắn")
+            return
         msg = self.input_box.text().strip()
 
         if not msg:
@@ -303,59 +332,6 @@ class DayChatWindow(QtWidgets.QWidget):
             self.messages_area.verticalScrollBar().maximum()
         ))
     
-    def receive_packets(self):
-        """Nhận gói tin từ server"""
-        if not self.network_client:
-            print("[DEBUG] Day chat: network_client is None in receive_packets")
-            return
-
-        try:
-            header, payload = self.network_client.receive_packet()
-
-            if header is None:
-                return
-
-            print(f"[DEBUG] Day chat received packet: header={header}, payload={payload}")
-            self.handle_packet(header, payload)
-            
-        except RuntimeError as e:
-            error_msg = str(e)
-            if "Server closed" in error_msg or "Receive failed" in error_msg:
-                print(f"[ERROR] Server disconnected: {error_msg}")
-                if self.toast_manager:
-                    self.toast_manager.error("⚠️ Server disconnected!")
-            else:
-                if self.toast_manager:
-                    self.toast_manager.error(f"Receive error: {error_msg}")
-        except ConnectionError as e:
-            print(f"[DEBUG] Connection lost: {e}")
-            if self.toast_manager:
-                self.toast_manager.error("⚠️ Connection lost!")
-    
-    def handle_packet(self, header, payload):
-        """Xử lý gói tin nhận được"""
-        # Handle PING
-        if header == 501:  # PING
-            try:
-                self.network_client.send_packet(502, {"type": "pong"})
-            except:
-                pass
-            return
-        
-        # Handle CHAT_BROADCAST
-        if header == 402:  # CHAT_BROADCAST
-            chat_type = payload.get("chat_type", "day")
-            print(f"[DEBUG] Day chat received CHAT_BROADCAST with type: {chat_type}")
-            # Only show day chat messages, ignore wolf chat
-            if chat_type == "day":
-                username = payload.get("username", "Unknown")
-                message = payload.get("message", "")
-                print(f"[DEBUG] Day chat displaying message from {username}: {message}")
-                self.append_message(username, message)
-            else:
-                print(f"[DEBUG] Day chat ignoring {chat_type} message")
-            return
-    
     def on_logout(self):
         """Handle logout button click"""
         reply = QtWidgets.QMessageBox.question(
@@ -374,10 +350,6 @@ class DayChatWindow(QtWidgets.QWidget):
                 
                 if self.toast_manager:
                     self.toast_manager.info("Logging out...")
-                
-                # Stop timer (legacy: this window no longer reads from socket directly)
-                if hasattr(self, "recv_timer") and self.recv_timer:
-                    self.recv_timer.stop()
                 
                 # Clear shared data
                 if self.window_manager:
@@ -398,22 +370,4 @@ class DayChatWindow(QtWidgets.QWidget):
             except Exception as e:
                 if self.toast_manager:
                     self.toast_manager.error(f"Logout error: {str(e)}")
-    
-    def closeEvent(self, event):
-        """Xử lý khi đóng cửa sổ - cleanup network client"""
-        if self.connection_monitor:
-            self.connection_monitor.stop()
-        
-        # Cleanup network client giống như Ctrl+C
-        print("[DEBUG] Day chat window closing, cleaning up...")
-        try:
-            if self.network_client:
-                self.network_client.disconnect()
-                self.network_client.destroy()
-        except Exception as e:
-            print(f"[ERROR] Error during day chat cleanup: {e}")
-        
-        event.accept()
-        # Quit application
-        QtWidgets.QApplication.instance().quit()
 

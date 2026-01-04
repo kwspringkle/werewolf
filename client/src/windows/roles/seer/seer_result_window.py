@@ -1,4 +1,5 @@
 from PyQt5 import QtWidgets, QtCore
+from components.user_header import UserHeader
 try:
     from utils.image_utils import create_image_icon_label
 except ImportError:
@@ -7,21 +8,29 @@ except ImportError:
     from image_utils import create_image_icon_label
 
 class SeerResultWindow(QtWidgets.QWidget):
-    """Show seer result styled like RoleCardWindow"""
-    def __init__(self, target_username, is_werewolf, parent=None):
+    """Màn hình kết quả của Seer"""
+    def __init__(self, target_username, is_werewolf, parent=None, window_manager=None, toast_manager=None):
         super().__init__(parent)
-        # Regular window with standard controls
         self.use_default_size = True
         self.preserve_window_flags = False
+        self.window_manager = window_manager
+        self.toast_manager = toast_manager
         self.setObjectName("seer_result_window")
         self.setWindowTitle("Seer Result")
-        self.resize(500, 600)
         self.setup_ui(target_username, is_werewolf)
 
     def setup_ui(self, target_username, is_werewolf):
         main_layout = QtWidgets.QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
+
+        my_username = None
+        if self.window_manager:
+            my_username = self.window_manager.get_shared_data("username")
+        self.user_header = UserHeader(self)
+        self.user_header.set_username(my_username or "Player")
+        self.user_header.logout_clicked.connect(self.on_logout)
+        main_layout.addWidget(self.user_header)
 
         card = QtWidgets.QFrame()
         card.setObjectName("seer_result_card")
@@ -66,6 +75,40 @@ class SeerResultWindow(QtWidgets.QWidget):
         card_layout.addWidget(btn, alignment=QtCore.Qt.AlignCenter)
 
         main_layout.addWidget(card)
+
+    def on_logout(self):
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Logout",
+            "Are you sure you want to logout?",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No,
+        )
+        if reply != QtWidgets.QMessageBox.Yes:
+            return
+
+        try:
+            if self.window_manager:
+                nc = self.window_manager.get_shared_data("network_client")
+                if nc:
+                    try:
+                        nc.send_packet(208, {})
+                    except Exception:
+                        pass
+                    try:
+                        nc.send_packet(105, {})
+                    except Exception:
+                        pass
+                self.window_manager.set_shared_data("user_id", None)
+                self.window_manager.set_shared_data("username", None)
+                self.window_manager.set_shared_data("current_room_id", None)
+                self.window_manager.set_shared_data("current_room_name", None)
+                self.window_manager.set_shared_data("is_host", False)
+                self.window_manager.set_shared_data("connected", False)
+                self.window_manager.navigate_to("welcome")
+        except Exception as e:
+            if self.toast_manager:
+                self.toast_manager.error(f"Logout error: {str(e)}")
 
     def closeEvent(self, event):
         event.accept()

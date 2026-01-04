@@ -169,9 +169,46 @@ void handle_login(int client_fd, cJSON *json){
 
                         add_session(client_fd, user_id, user->valuestring);
 
+                        // If this user was already in a room (e.g. disconnected mid-game),
+                        // rebind their socket so they can continue receiving broadcasts.
+                        int resume_room_id = 0;
+                        int resume_room_status = -1;
+                        int resume_as_spectator = 0;
+                        for (int r = 0; r < MAX_ROOMS; r++) {
+                            if (rooms[r].id == 0) continue;
+                            for (int i = 0; i < rooms[r].current_players; i++) {
+                                if (strcmp(rooms[r].players[i].username, user->valuestring) == 0) {
+                                    int old_socket = rooms[r].players[i].socket;
+                                    rooms[r].players[i].socket = client_fd;
+
+                                    resume_room_id = rooms[r].id;
+                                    resume_room_status = rooms[r].status;
+
+                                    // Requirement: on reconnect, user returns as dead spectator.
+                                    if (rooms[r].status == ROOM_PLAYING) {
+                                        rooms[r].players[i].is_alive = 0;
+                                        resume_as_spectator = 1;
+                                    }
+
+                                    if (rooms[r].host_socket == old_socket) {
+                                        rooms[r].host_socket = client_fd;
+                                    }
+                                    r = MAX_ROOMS; // break outer loop
+                                    break;
+                                }
+                            }
+                        }
+
                         cJSON_AddStringToObject(response, "status", "success");
                         cJSON_AddNumberToObject(response, "user_id", user_id);
                         cJSON_AddStringToObject(response, "username", user->valuestring);
+
+                        // Optional resume hints for the client.
+                        if (resume_room_id != 0) {
+                            cJSON_AddNumberToObject(response, "resume_room_id", resume_room_id);
+                            cJSON_AddNumberToObject(response, "resume_room_status", resume_room_status);
+                            cJSON_AddNumberToObject(response, "resume_as_spectator", resume_as_spectator);
+                        }
                         printf("User login: %s (ID: %d)\n", user->valuestring, user_id);
                     } else {
                         cJSON_AddStringToObject(response, "status", "fail");
@@ -264,6 +301,19 @@ void handle_create_room(int client_fd, cJSON *json) {
         free(res_str);
         cJSON_Delete(response);
         return;
+    }
+
+    // Kiểm tra trùng tên phòng: không cho phép tạo phòng nếu tên đã tồn tại
+    for (int i = 0; i < MAX_ROOMS; i++) {
+        if (rooms[i].id != 0 && strcmp(rooms[i].name, room_name->valuestring) == 0) {
+            cJSON_AddStringToObject(response, "status", "fail");
+            cJSON_AddStringToObject(response, "message", "Room name already exists");
+            char *res_str = cJSON_PrintUnformatted(response);
+            send_packet(client_fd, CREATE_ROOM_RES, res_str);
+            free(res_str);
+            cJSON_Delete(response);
+            return;
+        }
     }
 
     int room_index = -1;
@@ -445,6 +495,11 @@ void handle_disconnect(int client_fd) {
                 if (rooms[room_index].status == ROOM_PLAYING) {
                     // Mark player as dead instead of removing them
                     rooms[room_index].players[player_index].is_alive = 0;
+                    // Clear socket to avoid sending to a stale fd (fd numbers can be reused)
+                    rooms[room_index].players[player_index].socket = 0;
+                    if (rooms[room_index].host_socket == client_fd) {
+                        rooms[room_index].host_socket = 0;
+                    }
                     printf("Player %s in room %d marked as dead (disconnected during game)\n", 
                            username, rooms[room_index].id);
                     
@@ -693,7 +748,18 @@ void handle_get_room_info(int client_fd, cJSON *json) {
     cJSON_AddStringToObject(response, "room_name", rooms[room_index].name);
     cJSON_AddNumberToObject(response, "current_players", rooms[room_index].current_players);
     cJSON_AddNumberToObject(response, "max_players", MAX_PLAYERS_PER_ROOM);
-    cJSON_AddNumberToObject(response, "status", rooms[room_index].status);
+    cJSON_AddNumberToObject(response, "room_status", rooms[room_index].status);
+
+    // Phase hints for resume
+    cJSON_AddNumberToObject(response, "night_phase_active", rooms[room_index].night_phase_active);
+    cJSON_AddNumberToObject(response, "role_card_done_count", rooms[room_index].role_card_done_count);
+    cJSON_AddNumberToObject(response, "role_card_total", rooms[room_index].role_card_total);
+    cJSON_AddNumberToObject(response, "role_card_start_time", (double)rooms[room_index].role_card_start_time);
+
+    // Deadlines (epoch seconds) so client can compute remaining if desired
+    cJSON_AddNumberToObject(response, "seer_deadline", (double)rooms[room_index].seer_deadline);
+    cJSON_AddNumberToObject(response, "guard_deadline", (double)rooms[room_index].guard_deadline);
+    cJSON_AddNumberToObject(response, "wolf_deadline", (double)rooms[room_index].wolf_deadline);
 
     cJSON *players = cJSON_CreateArray();
     for (int i = 0; i < rooms[room_index].current_players; i++) {
@@ -703,9 +769,11 @@ void handle_get_room_info(int client_fd, cJSON *json) {
 
         int is_host = (rooms[room_index].players[i].socket == rooms[room_index].host_socket) ? 1 : 0;
         cJSON_AddNumberToObject(player, "is_host", is_host);
+        cJSON_AddNumberToObject(player, "is_alive", rooms[room_index].players[i].is_alive);
 
         cJSON_AddItemToArray(players, player);
     }
+    cJSON_AddItemToObject(response, "players", players);
 
     char *res_str = cJSON_PrintUnformatted(response);
     send_packet(client_fd, GET_ROOM_INFO_RES, res_str);
@@ -923,7 +991,7 @@ void process_packet(int client_fd, uint16_t header, const char *payload) {
         case GET_ROOM_INFO_REQ:
             handle_get_room_info(client_fd, json);
             break;
-        case PING:  // Client gửi PING (ít dùng, server thường gửi PING để check client)
+        case PING:  // Client gửi PING 
             handle_ping(client_fd, json);
             break;
         case PONG:  // Client trả về PONG sau khi nhận PING từ server

@@ -211,6 +211,15 @@ class NightPhaseController:
                 print(f"[WARNING] my_username {self.my_username} is in wolf_usernames but is_wolf is False! Fixing...")
                 self.is_wolf = True
         
+        my_is_alive = True
+        try:
+            for p in self.players:
+                if isinstance(p, dict) and p.get('username') == self.my_username:
+                    my_is_alive = int(p.get('is_alive', 1)) != 0
+                    break
+        except Exception:
+            my_is_alive = True
+
         if self.is_wolf:
             print("[DEBUG] User is wolf - showing WolfSelectWindow")
 
@@ -221,6 +230,7 @@ class NightPhaseController:
                 duration_seconds=self.wolf_duration,
                 network_client=self.network_client,
                 room_id=self.room_id,
+                can_vote=my_is_alive,
             )
             self.window_manager.register_window("wolf_select", self.wolf_controller)
 

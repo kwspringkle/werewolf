@@ -1,15 +1,14 @@
 from PyQt5 import QtWidgets, QtCore
+from components.user_header import UserHeader
 
 class WolfChatWindow(QtWidgets.QWidget):
     """Styled wolf chat (card-like, timer)"""
-    def __init__(self, my_username, wolf_usernames, send_callback=None, duration_seconds=30, network_client=None, room_id=None, parent=None):
+    def __init__(self, my_username, wolf_usernames, send_callback=None, duration_seconds=30, network_client=None, room_id=None, parent=None, window_manager=None, toast_manager=None):
         super().__init__(parent)
-        # Regular window with standard controls
         self.use_default_size = True
         self.preserve_window_flags = False
         self.setObjectName("wolf_chat_window")
         self.setWindowTitle("Wolf Chat")
-        self.resize(500, 600)
         self.send_callback = send_callback
         self.my_username = my_username
         self.wolf_usernames = wolf_usernames
@@ -17,6 +16,9 @@ class WolfChatWindow(QtWidgets.QWidget):
         self.remaining = duration_seconds
         self.network_client = network_client
         self.room_id = room_id
+        self.window_manager = window_manager
+        self.toast_manager = toast_manager
+        self.can_send_chat = True
         self.setup_ui()
         self.start_timer()
         # IMPORTANT: Do NOT read from network socket here.
@@ -26,6 +28,11 @@ class WolfChatWindow(QtWidgets.QWidget):
         main_layout = QtWidgets.QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
+
+        self.user_header = UserHeader(self)
+        self.user_header.set_username(self.my_username or "Player")
+        self.user_header.logout_clicked.connect(self.on_logout)
+        main_layout.addWidget(self.user_header)
 
         card = QtWidgets.QFrame()
         card.setObjectName("wolf_chat_card")
@@ -74,7 +81,7 @@ class WolfChatWindow(QtWidgets.QWidget):
                 background-color: #ff5770;
             }
             QPushButton:pressed {
-                background-color: #d63851;
+                background-color: #d03550;
             }
         """)
         header_h.addWidget(self.switch_btn)
@@ -103,6 +110,15 @@ class WolfChatWindow(QtWidgets.QWidget):
         self.messages_layout.addStretch()
         self.messages_area.setWidget(self.messages_container)
         card_layout.addWidget(self.messages_area, 1)
+
+        # Hint for dead users
+        self.chat_hint_label = QtWidgets.QLabel("Bạn đã chết, bạn không thể gửi tin nhắn.")
+        self.chat_hint_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.chat_hint_label.setVisible(False)
+        self.chat_hint_label.setStyleSheet(
+            "font-size:12px; color:#f39c12; background-color: rgba(243,156,18,0.12); padding:6px; border-radius:6px;"
+        )
+        card_layout.addWidget(self.chat_hint_label)
 
         # Input row (styled like lobby)
         input_layout = QtWidgets.QHBoxLayout()
@@ -136,11 +152,76 @@ class WolfChatWindow(QtWidgets.QWidget):
         self.send_btn.setEnabled(False)
         self.send_btn.clicked.connect(self.send_message)
         input_layout.addWidget(self.send_btn)
-        self.input_box.textChanged.connect(lambda t: self.send_btn.setEnabled(bool(t.strip())))
+        self.input_box.textChanged.connect(lambda t: self.send_btn.setEnabled(bool(t.strip()) and self.can_send_chat))
 
         card_layout.addLayout(input_layout)
 
         main_layout.addWidget(card)
+
+        # Apply chat permissions after UI is built
+        self.refresh_chat_permissions()
+
+    def _is_me_alive(self) -> bool:
+        if not self.window_manager or not self.my_username:
+            return True
+        players = self.window_manager.get_shared_data("room_players", [])
+        if not isinstance(players, list):
+            return True
+        for p in players:
+            if isinstance(p, dict) and p.get("username") == self.my_username:
+                raw = p.get("is_alive", 1)
+                try:
+                    return int(raw) != 0
+                except Exception:
+                    return bool(raw)
+        return True
+
+    def refresh_chat_permissions(self):
+        alive = self._is_me_alive()
+        self.can_send_chat = bool(alive)
+        if hasattr(self, "chat_hint_label"):
+            self.chat_hint_label.setVisible(not self.can_send_chat)
+        if hasattr(self, "input_box"):
+            self.input_box.setEnabled(self.can_send_chat)
+        if hasattr(self, "send_btn"):
+            if not self.can_send_chat:
+                self.send_btn.setEnabled(False)
+            else:
+                self.send_btn.setEnabled(bool(self.input_box.text().strip()))
+
+    def on_logout(self):
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Logout",
+            "Are you sure you want to logout?",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No,
+        )
+        if reply != QtWidgets.QMessageBox.Yes:
+            return
+
+        try:
+            nc = self.network_client
+            if nc:
+                try:
+                    nc.send_packet(208, {})
+                except Exception:
+                    pass
+                try:
+                    nc.send_packet(105, {})
+                except Exception:
+                    pass
+            if self.window_manager:
+                self.window_manager.set_shared_data("user_id", None)
+                self.window_manager.set_shared_data("username", None)
+                self.window_manager.set_shared_data("current_room_id", None)
+                self.window_manager.set_shared_data("current_room_name", None)
+                self.window_manager.set_shared_data("is_host", False)
+                self.window_manager.set_shared_data("connected", False)
+                self.window_manager.navigate_to("welcome")
+        except Exception as e:
+            if self.toast_manager:
+                self.toast_manager.error(f"Logout error: {str(e)}")
 
     def start_timer(self):
         self.timer = QtCore.QTimer(self)
@@ -178,6 +259,10 @@ class WolfChatWindow(QtWidgets.QWidget):
             print(f"[DEBUG] Wolf chat received: {username}: {message}")
 
     def send_message(self):
+        if not self.can_send_chat:
+            if self.toast_manager:
+                self.toast_manager.warning("Bạn đã chết, không thể gửi tin nhắn")
+            return
         msg = self.input_box.text().strip()
         if msg:
             try:
@@ -220,9 +305,9 @@ class WolfChatWindow(QtWidgets.QWidget):
         bubble.setContentsMargins(10, 8, 10, 8)
         bubble.setMaximumWidth(360)
         if is_self:
-            bubble.setStyleSheet("background:#e94560; color:white; padding:8px; border-radius:12px;")
+            bubble.setStyleSheet("background:#2ecc71; color:#062b1a; padding:8px; border-radius:12px;")
         else:
-            bubble.setStyleSheet("background:#3498db; color:white; padding:8px; border-radius:12px;")
+            bubble.setStyleSheet("background:#e94560; color:white; padding:8px; border-radius:12px;")
         v.addWidget(bubble, alignment=QtCore.Qt.AlignLeft if not is_self else QtCore.Qt.AlignRight)
 
         # Wrap into hbox to align left or right

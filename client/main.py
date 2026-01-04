@@ -79,6 +79,9 @@ class WerewolfApplication:
         
         # Tạo toast manager với welcome window làm parent
         self.toast_manager = ToastManager(self.welcome_window)
+
+        # Share toast manager for any dynamically created windows (e.g., night role windows)
+        self.window_manager.set_shared_data("toast_manager", self.toast_manager)
         
         # Cập nhật toast manager cho welcome window
         self.welcome_window.toast_manager = self.toast_manager
@@ -123,16 +126,16 @@ class WerewolfApplication:
             self.window_manager
         )
 
-        # In-game overlay screens (night roles). These instances will be refreshed/overwritten by NightPhaseController as needed,
+        # Night role screens. These instances will be refreshed/overwritten by NightPhaseController as needed,
         # but registering defaults here avoids "window not registered" when navigating.
-        self.window_manager.register_window("seer_select", SeerSelectWindow([], "", 30, None, None))
-        self.window_manager.register_window("seer_wait", SeerWaitWindow(30))
-        self.window_manager.register_window("seer_result", SeerResultWindow("", False))
-        self.window_manager.register_window("guard_select", GuardSelectWindow([], "", 30, None, None))
-        self.window_manager.register_window("guard_wait", GuardWaitWindow(30))
-        self.window_manager.register_window("wolf_select", WolfSelectWindow([], [], "", 60, None, None))
-        self.window_manager.register_window("wolf_wait", WolfWaitWindow(60))
-        self.window_manager.register_window("wolf_chat", WolfChatWindow("", [], duration_seconds=60))
+        self.window_manager.register_window("seer_select", SeerSelectWindow([], "", 30, None, None, window_manager=self.window_manager, toast_manager=self.toast_manager))
+        self.window_manager.register_window("seer_wait", SeerWaitWindow(30, window_manager=self.window_manager, toast_manager=self.toast_manager))
+        self.window_manager.register_window("seer_result", SeerResultWindow("", False, window_manager=self.window_manager, toast_manager=self.toast_manager))
+        self.window_manager.register_window("guard_select", GuardSelectWindow([], "", 30, None, None, window_manager=self.window_manager, toast_manager=self.toast_manager))
+        self.window_manager.register_window("guard_wait", GuardWaitWindow(30, window_manager=self.window_manager, toast_manager=self.toast_manager))
+        self.window_manager.register_window("wolf_select", WolfSelectWindow([], [], "", 60, None, None, window_manager=self.window_manager, toast_manager=self.toast_manager))
+        self.window_manager.register_window("wolf_wait", WolfWaitWindow(60, window_manager=self.window_manager, toast_manager=self.toast_manager))
+        self.window_manager.register_window("wolf_chat", WolfChatWindow("", [], duration_seconds=60, window_manager=self.window_manager, toast_manager=self.toast_manager))
         
         # Đăng ký các cửa sổ
         self.window_manager.register_window("welcome", self.welcome_window)

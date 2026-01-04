@@ -125,50 +125,55 @@ class RoomWindow(QtWidgets.QWidget):
         # Connect signals
         self.start_game_button.clicked.connect(self.on_start_game)
         self.leave_room_button.clicked.connect(self.on_leave_room)
-        
-    def showEvent(self, event):
-        """Called when window is shown"""
-        super().showEvent(event)
-        
+
+    def activate_room_context(self, start_receiving=True):
+        """Initialize room state from shared_data and optionally start receiving.
+
+        This allows the RoomWindow to act as the single packet consumer even when the
+        UI window itself should stay hidden (e.g., reconnect/resume).
+        """
         # Get shared data
         self.network_client = self.window_manager.get_shared_data("network_client")
         self.current_room_id = self.window_manager.get_shared_data("current_room_id")
         room_name = self.window_manager.get_shared_data("current_room_name")
         self.is_host = self.window_manager.get_shared_data("is_host", False)
         username = self.window_manager.get_shared_data("username")
-        
-        # Lấy thông tin host từ room_players (player đầu tiên là host)
+
+        # Determine host from room_players
         players = self.window_manager.get_shared_data("room_players", [])
         if players:
-            self.current_host = players[0].get("username")
+            try:
+                self.current_host = players[0].get("username")
+            except Exception:
+                self.current_host = None
         else:
             self.current_host = username if self.is_host else None
-        
-        # Update UI
-        self.room_title_label.setText(f"🏠 {room_name}")
-        
+
+        # Update UI (safe even if hidden)
+        if room_name is not None:
+            self.room_title_label.setText(f"🏠 {room_name}")
+
         host_text = " - You are HOST 👑" if self.is_host else ""
-        self.room_info_label.setText(f"Room ID: {self.current_room_id}{host_text}")
-        
-        # Set username in header
+        if self.current_room_id is not None:
+            self.room_info_label.setText(f"Room ID: {self.current_room_id}{host_text}")
+
         if username:
             self.user_header.set_username(username)
 
-        # Show and enable start button only for host
         self.start_game_button.setVisible(self.is_host)
         if self.is_host:
-            self.start_game_button.setEnabled(False)  # Will be enabled when enough players
+            self.start_game_button.setEnabled(False)
 
-        # Load players
-        self.update_player_list(players, username)
-        self.current_player_count = len(players)
-        self.update_player_count_ui()
-
-        # Start receiving
-        self.recv_timer.start(100)
+        # Load players into UI
+        try:
+            self.update_player_list(players, username)
+            self.current_player_count = len(players) if isinstance(players, list) else 0
+            self.update_player_count_ui()
+        except Exception:
+            pass
 
         # Setup connection monitor
-        if not self.connection_monitor:
+        if not self.connection_monitor and self.network_client:
             self.connection_monitor = ConnectionMonitor(
                 self.network_client,
                 self.toast_manager,
@@ -176,7 +181,18 @@ class RoomWindow(QtWidgets.QWidget):
             )
             self.connection_monitor.connection_lost.connect(self.on_connection_lost)
             self.connection_monitor.connection_restored.connect(self.on_connection_restored)
-        self.connection_monitor.start()
+
+        if self.connection_monitor:
+            self.connection_monitor.start()
+
+        # Start receiving packets
+        if start_receiving and self.network_client and not self.recv_timer.isActive():
+            self.recv_timer.start(100)
+        
+    def showEvent(self, event):
+        """Called when window is shown"""
+        super().showEvent(event)
+        self.activate_room_context(start_receiving=True)
         
     def hideEvent(self, event):
         """Called when window is hidden"""
@@ -356,13 +372,13 @@ class RoomWindow(QtWidgets.QWidget):
         # Hiển thị thông báo
         self.toast_manager.error("⚠️ Server disconnected! Returning to welcome screen...")
         
-        # Cleanup network client
+        # Mark disconnected but keep client instance so Welcome/ConnectionMonitor can reconnect
+        self.window_manager.set_shared_data("connected", False)
         try:
             if self.network_client:
                 self.network_client.disconnect()
-                self.network_client.destroy()
         except Exception as e:
-            print(f"[ERROR] Error during cleanup: {e}")
+            print(f"[ERROR] Error during disconnect: {e}")
         
         # Clear shared data
         self.window_manager.set_shared_data("user_id", None)
@@ -370,7 +386,14 @@ class RoomWindow(QtWidgets.QWidget):
         self.window_manager.set_shared_data("current_room_id", None)
         self.window_manager.set_shared_data("current_room_name", None)
         self.window_manager.set_shared_data("is_host", False)
-        self.window_manager.set_shared_data("network_client", None)
+        # Keep shared network_client instance (no None) to avoid NoneType in login/register
+
+        # Hide any leftover gameplay windows opened via open_window()
+        try:
+            if hasattr(self.window_manager, "hide_all_except"):
+                self.window_manager.hide_all_except({"welcome"})
+        except Exception:
+            pass
         
         # Navigate về welcome screen
         self.window_manager.navigate_to("welcome")
@@ -501,6 +524,17 @@ class RoomWindow(QtWidgets.QWidget):
                 if game_started:
                     # Sau khi game start: mark as dead
                     self.toast_manager.error(f"💀 {player_username} disconnected - Marked as DEAD")
+
+                    # Update shared room_players so other UIs (chat) can disable sending
+                    try:
+                        room_players = self.window_manager.get_shared_data("room_players", [])
+                        if isinstance(room_players, list):
+                            for p in room_players:
+                                if isinstance(p, dict) and p.get("username") == player_username:
+                                    p["is_alive"] = 0
+                            self.window_manager.set_shared_data("room_players", room_players)
+                    except Exception as e:
+                        print(f"[WARNING] Failed to update room_players on disconnect: {e}")
                     
                     # Mark player as dead in list
                     for i in range(self.player_list.count()):
@@ -721,10 +755,20 @@ class RoomWindow(QtWidgets.QWidget):
                 if result == "killed" and target:
                     dead_players = [target]
                 print(f"[DEBUG] PHASE_DAY compact result: {result}, target={target}")
-                print(f"[DEBUG] dead_players array: {dead_players}")
             else:
                 dead_players = payload.get("dead_players", [])
                 print(f"[DEBUG] Dead players (legacy): {dead_players}")
+
+            # Update shared room_players alive status so day chat can disable sending for dead users
+            try:
+                room_players = self.window_manager.get_shared_data("room_players", [])
+                if isinstance(room_players, list) and dead_players:
+                    for p in room_players:
+                        if isinstance(p, dict) and p.get("username") in dead_players:
+                            p["is_alive"] = 0
+                    self.window_manager.set_shared_data("room_players", room_players)
+            except Exception as e:
+                print(f"[WARNING] Failed to update room_players on PHASE_DAY: {e}")
             
             # Đóng tất cả các window của night phase
             night_ctrl = self.window_manager.get_shared_data("night_phase_controller")
@@ -764,13 +808,10 @@ class RoomWindow(QtWidgets.QWidget):
             
             # Hiển thị death announcement window
             if "death_announcement" in self.window_manager.windows:
-                print(f"[DEBUG] Navigating to death_announcement with dead_players: {dead_players}")
-                # Navigate trước
-                self.window_manager.navigate_to("death_announcement")
-                # Sau đó set dead players (sau khi window đã được show)
                 death_window = self.window_manager.windows["death_announcement"]
                 death_window.set_dead_players(dead_players)
-                print(f"[DEBUG] Called set_dead_players on death_announcement_window")
+                # Use WindowManager so countdown can auto-navigate to day chat and auto-hide this screen.
+                self.window_manager.navigate_to("death_announcement")
             else:
                 print("[ERROR] Death announcement window not registered")
                 # Fallback: navigate directly to day chat
@@ -808,6 +849,21 @@ class RoomWindow(QtWidgets.QWidget):
         players_raw = self.window_manager.get_shared_data("room_players", [])
         my_username = self.window_manager.get_shared_data("username")
         room_id = self.window_manager.get_shared_data("current_room_id")
+
+        spectator_mode = bool(self.window_manager.get_shared_data("spectator_mode", False))
+        my_is_alive = True
+        try:
+            for p in players_raw:
+                if isinstance(p, dict) and p.get("username") == my_username:
+                    my_is_alive = int(p.get("is_alive", 1)) != 0
+                    break
+        except Exception:
+            my_is_alive = True
+
+        if spectator_mode or not my_is_alive:
+            is_seer = False
+            is_guard = False
+            is_wolf = False
         
         # Đảm bảo players có đầy đủ thông tin: username và is_alive
         # Players list từ server đã có is_alive, chỉ cần normalize format
@@ -866,12 +922,31 @@ class RoomWindow(QtWidgets.QWidget):
         # Stop timer
         self.recv_timer.stop()
 
+        # Remember last room so Login can attempt resume.
+        try:
+            room_id = self.window_manager.get_shared_data("current_room_id")
+            room_name = self.window_manager.get_shared_data("current_room_name")
+            if room_id:
+                self.window_manager.set_shared_data("last_room_id", room_id)
+                self.window_manager.set_shared_data("last_room_name", room_name)
+                self.window_manager.set_shared_data("resume_room_after_login", True)
+        except Exception:
+            pass
+
         # Clear session and room data
         self.window_manager.set_shared_data("user_id", None)
         self.window_manager.set_shared_data("username", None)
         self.window_manager.set_shared_data("current_room_id", None)
         self.window_manager.set_shared_data("current_room_name", None)
         self.window_manager.set_shared_data("is_host", False)
+        self.window_manager.set_shared_data("role_info", {})
+
+        # Hide any leftover gameplay windows opened via open_window() before showing login
+        try:
+            if hasattr(self.window_manager, "hide_all_except"):
+                self.window_manager.hide_all_except({"login"})
+        except Exception:
+            pass
 
         # Navigate to login screen
         self.window_manager.navigate_to("login")
@@ -904,6 +979,7 @@ class RoomWindow(QtWidgets.QWidget):
                 self.window_manager.set_shared_data("current_room_id", None)
                 self.window_manager.set_shared_data("is_host", False)
                 self.window_manager.set_shared_data("connected", False)
+                self.window_manager.set_shared_data("spectator_mode", False)
 
                 # KHÔNG disconnect network_client - chỉ clear session
                 # Network client vẫn giữ kết nối để có thể login lại
@@ -914,26 +990,8 @@ class RoomWindow(QtWidgets.QWidget):
             except Exception as e:
                 self.toast_manager.error(f"Logout error: {str(e)}")
                 self.window_manager.set_shared_data("current_room_name", None)
-    
-    def closeEvent(self, event):
-        """Xử lý khi đóng cửa sổ - cleanup network client"""
-        self.recv_timer.stop()
-        if self.connection_monitor:
-            self.connection_monitor.stop()
-        
-        # Cleanup network client giống như Ctrl+C
-        print("[DEBUG] Room window closing, cleaning up...")
-        try:
-            if self.network_client:
-                self.network_client.disconnect()
-                self.network_client.destroy()
-        except Exception as e:
-            print(f"[ERROR] Error during room cleanup: {e}")
-        
-        event.accept()
-        # Quit application
-        QtWidgets.QApplication.instance().quit()
                 self.window_manager.set_shared_data("is_host", False)
+                self.window_manager.set_shared_data("spectator_mode", False)
                 
                 # Disconnect from server
                 self.network_client.disconnect()

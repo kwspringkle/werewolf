@@ -32,6 +32,11 @@ class RegisterWindow(QtWidgets.QWidget):
         super().showEvent(event)
         # Get network client from shared data
         self.network_client = self.window_manager.get_shared_data("network_client")
+        connected = self.window_manager.get_shared_data("connected", False)
+        if not self.network_client or not connected:
+            self.toast_manager.warning("Please connect to server first")
+            self.window_manager.navigate_to("welcome")
+            return
         print(f"[DEBUG] Register window shown, network_client: {self.network_client}")
         if self.network_client:
             print("[DEBUG] Starting recv_timer for register window")
@@ -221,16 +226,13 @@ class RegisterWindow(QtWidgets.QWidget):
         # Hiển thị thông báo
         self.toast_manager.error("⚠️ Server disconnected! Returning to welcome screen...")
         
-        # Cleanup network client
+        # Mark disconnected but keep client instance so Welcome can reconnect
+        self.window_manager.set_shared_data("connected", False)
         try:
             if self.network_client:
                 self.network_client.disconnect()
-                self.network_client.destroy()
         except Exception as e:
-            print(f"[ERROR] Error during cleanup: {e}")
-        
-        # Clear shared data
-        self.window_manager.set_shared_data("network_client", None)
+            print(f"[ERROR] Error during disconnect: {e}")
         
         # Navigate về welcome screen
         self.window_manager.navigate_to("welcome")

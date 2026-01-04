@@ -1,10 +1,10 @@
 from PyQt5 import QtWidgets, QtCore
+from components.user_header import UserHeader
 
 class GuardSelectWindow(QtWidgets.QWidget):
-    """Guard selection screen styled like RoleCardWindow, with countdown"""
-    def __init__(self, players, my_username, duration_seconds=30, network_client=None, room_id=None, parent=None):
+    """Màn hình chọn người chơi để bảo vệ"""
+    def __init__(self, players, my_username, duration_seconds=30, network_client=None, room_id=None, parent=None, window_manager=None, toast_manager=None):
         super().__init__(parent)
-        # Regular window with standard controls
         self.use_default_size = True
         self.preserve_window_flags = False
         self.players = players
@@ -13,10 +13,11 @@ class GuardSelectWindow(QtWidgets.QWidget):
         self.remaining = duration_seconds
         self.network_client = network_client
         self.room_id = room_id
+        self.window_manager = window_manager
+        self.toast_manager = toast_manager
         self.selected_username = None
         self.setObjectName("guard_select_window")
         self.setWindowTitle("Guard — Protect a player")
-        self.resize(500, 700)  # Tăng chiều cao để hiển thị nhiều players hơn
         self.setup_ui()
         self.start_timer()
 
@@ -24,6 +25,11 @@ class GuardSelectWindow(QtWidgets.QWidget):
         main_layout = QtWidgets.QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
+
+        self.user_header = UserHeader(self)
+        self.user_header.set_username(self.my_username or "Player")
+        self.user_header.logout_clicked.connect(self.on_logout)
+        main_layout.addWidget(self.user_header)
 
         card = QtWidgets.QFrame()
         card.setObjectName("guard_card")
@@ -93,7 +99,11 @@ class GuardSelectWindow(QtWidgets.QWidget):
         # Đảm bảo hiển thị TẤT CẢ players, không filter
         for p in self.players:
             uname = p.get("username") if isinstance(p, dict) else str(p)
-            is_alive = p.get("is_alive", 1) if isinstance(p, dict) else 1
+            raw_alive = p.get("is_alive", 1) if isinstance(p, dict) else 1
+            try:
+                is_alive = int(raw_alive) != 0
+            except Exception:
+                is_alive = bool(raw_alive)
 
             card_item = QtWidgets.QFrame()
             card_item.setObjectName("user_card")
@@ -128,7 +138,13 @@ class GuardSelectWindow(QtWidgets.QWidget):
             icon_label.setStyleSheet("font-size: 32px; padding-top: 5px;")
             card_item_layout.addWidget(icon_label)
 
-            name_label = QtWidgets.QLabel(uname + ("\n(Dead)" if not is_alive else ""))
+            label_name = uname
+            if uname == self.my_username:
+                label_name = f"{uname}\n(You)"
+            if not is_alive:
+                label_name = label_name + "\n(Dead)"
+
+            name_label = QtWidgets.QLabel(label_name)
             name_label.setAlignment(QtCore.Qt.AlignCenter)
             name_label.setStyleSheet(f"""
                 font-size: 11px;
@@ -151,7 +167,7 @@ class GuardSelectWindow(QtWidgets.QWidget):
                 card_item.setEnabled(False)
             
             self.user_cards.append((card_item, uname, is_alive))
-            # Set size policy for each card to ensure they're visible
+            # Size policy để có thể hiển thị
             card_item.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
             card_item.setMinimumSize(100, 100)
             self.user_grid_layout.addWidget(card_item, row, col)
@@ -162,7 +178,7 @@ class GuardSelectWindow(QtWidgets.QWidget):
                 row += 1
         print(f"[DEBUG] Total cards added to grid: {len(self.user_cards)}")
         
-        # Add scroll area instead of grid widget directly
+        # Thêm scroll area
         self.card_layout.addWidget(scroll_area, 1)  # stretch factor = 1
         btn_layout = QtWidgets.QHBoxLayout()
         btn_layout.setSpacing(10)
@@ -190,7 +206,7 @@ class GuardSelectWindow(QtWidgets.QWidget):
         btn_layout.addWidget(self.skip_btn)
         self.select_btn = QtWidgets.QPushButton("Protect")
         self.select_btn.setMinimumHeight(35)
-        self.select_btn.setEnabled(False)  # Disabled until player is selected
+        self.select_btn.setEnabled(False)  # Disabled cho đến khi player selected
         self.select_btn.setStyleSheet("""
             QPushButton {
                 background-color: #43d9ad;
@@ -233,16 +249,16 @@ class GuardSelectWindow(QtWidgets.QWidget):
 
     def _make_card_click(self, card_item, uname, is_alive):
         def handler(event):
-            # Only allow selection if player is alive
+            # Chỉ cho phép chọn nếu người chơi còn sống
             if not is_alive:
                 return
             
             # Guard có thể chọn chính mình (bảo vệ chính mình)
             # Bỏ chọn tất cả
             for c, _, alive in self.user_cards:
-                if alive:  # Only update style for alive players
+                if alive:  # Chỉ cập nhật style cho người chơi còn sống
                     c.setProperty("selected", False)
-                    # Update style to show unselected
+                    # Cập nhật style để hiển thị trạng thái không được chọn
                     c.setStyleSheet("""
                         QFrame#user_card {
                             background-color: #1a1a2e;
@@ -261,7 +277,6 @@ class GuardSelectWindow(QtWidgets.QWidget):
                 }
             """)
             self.selected_username = uname
-            # Enable protect button
             self.select_btn.setEnabled(True)
         return handler
 
@@ -271,26 +286,28 @@ class GuardSelectWindow(QtWidgets.QWidget):
             QtWidgets.QMessageBox.warning(self, "Select player", "Please select a player to protect")
             return
         
-        # Disable buttons to prevent multiple clicks
+        # Vô hiệu hóa nút để tránh nhấn nhiều lần
         self.select_btn.setEnabled(False)
         self.skip_btn.setEnabled(False)
         
-        # Stop timer
+        # Dừng bộ đếm thời gian
         if hasattr(self, 'timer'):
             self.timer.stop()
         
         if self.network_client and self.room_id is not None:
             try:
-                # Gửi GUARD_PROTECT_REQ (407) đến server
                 print(f"[DEBUG] Sending GUARD_PROTECT_REQ for target: {target}")
-                self.network_client.send_packet(407, {
-                    "room_id": self.room_id,
-                    "target_username": target
-                })
+                if hasattr(self.network_client, "send_guard_protect"):
+                    self.network_client.send_guard_protect(self.room_id, target)
+                else:
+                    self.network_client.send_packet(407, {
+                        "room_id": self.room_id,
+                        "target_username": target
+                    })
             except Exception as e:
                 print(f"[ERROR] Error sending guard protect request: {e}")
                 QtWidgets.QMessageBox.warning(self, "Network", "Failed to send guard protect request")
-                # Re-enable buttons on error
+                # Bật lại nút khi có lỗi
                 self.select_btn.setEnabled(True)
                 self.skip_btn.setEnabled(True)
                 if hasattr(self, 'timer'):
@@ -300,11 +317,46 @@ class GuardSelectWindow(QtWidgets.QWidget):
         # Close window - server sẽ broadcast PHASE_WOLF_START khi guard chọn xong
         self.close()
 
+    def on_logout(self):
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Logout",
+            "Are you sure you want to logout?",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No,
+        )
+        if reply != QtWidgets.QMessageBox.Yes:
+            return
+
+        try:
+            nc = self.network_client
+            if nc:
+                try:
+                    nc.send_packet(208, {})
+                except Exception:
+                    pass
+                try:
+                    nc.send_packet(105, {})
+                except Exception:
+                    pass
+
+            if self.window_manager:
+                self.window_manager.set_shared_data("user_id", None)
+                self.window_manager.set_shared_data("username", None)
+                self.window_manager.set_shared_data("current_room_id", None)
+                self.window_manager.set_shared_data("current_room_name", None)
+                self.window_manager.set_shared_data("is_host", False)
+                self.window_manager.set_shared_data("connected", False)
+                self.window_manager.navigate_to("welcome")
+        except Exception as e:
+            if self.toast_manager:
+                self.toast_manager.error(f"Logout error: {str(e)}")
+
     def on_skip(self):
-        # Stop timer
+        # Dừng bộ đếm thời gian
         if hasattr(self, 'timer'):
             self.timer.stop()
-        # Disable buttons
+        # Vô hiệu hóa nút
         self.select_btn.setEnabled(False)
         self.skip_btn.setEnabled(False)
         # Close window - server sẽ broadcast PHASE_WOLF_START khi timeout

@@ -9,12 +9,6 @@
 #include "protocol.h"
 #include <time.h>
 
-// Duration cho mỗi phase (giây)
-#define SEER_PHASE_DURATION 30
-#define GUARD_PHASE_DURATION 30
-#define WOLF_PHASE_DURATION 60
-#define TOTAL_NIGHT_PHASE_DURATION (SEER_PHASE_DURATION + GUARD_PHASE_DURATION + WOLF_PHASE_DURATION)
-
 Room rooms[MAX_ROOMS];
 
 void init_rooms() {

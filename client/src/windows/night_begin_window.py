@@ -1,5 +1,6 @@
 from PyQt5 import QtWidgets, QtCore
 import sys
+import time
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from components.user_header import UserHeader
@@ -8,18 +9,17 @@ class NightBeginWindow(QtWidgets.QWidget):
     """Night begin screen styled like RoleCardWindow, with countdown"""
     def __init__(self, toast_manager=None, window_manager=None):
         super().__init__()
-        # In-game overlay screen (WindowManager-driven)
-        self.use_default_size = False
-        self.preserve_window_flags = True
+        # Normal window (movable, consistent sizing via WindowManager)
+        self.use_default_size = True
+        self.preserve_window_flags = False
         self.toast_manager = toast_manager
         self.window_manager = window_manager
         self.duration = 30
         self.remaining = 30
+        self.deadline = None
         self.timer = None
         self.setObjectName("night_begin_window")
         self.setWindowTitle("Night Begins")
-        self.setFixedSize(600, 500)  # Set fixed size để tránh window trắng
-        self.setWindowFlags(QtCore.Qt.Window | QtCore.Qt.FramelessWindowHint)
         self.setup_ui()
         
     def showEvent(self, event):
@@ -28,12 +28,21 @@ class NightBeginWindow(QtWidgets.QWidget):
         # Set username cho user_header
         username = self.window_manager.get_shared_data("username", "Player")
         self.user_header.set_username(username)
-        # Lấy remaining_time từ shared data
-        remaining_time = self.window_manager.get_shared_data("night_begin_remaining_time", 30)
-        self.duration = remaining_time
-        self.remaining = remaining_time
+        # Prefer shared deadline for stable sync
+        shared_deadline = self.window_manager.get_shared_data("night_begin_deadline")
+        if shared_deadline is None:
+            remaining_time = self.window_manager.get_shared_data("night_begin_remaining_time", 30)
+            shared_deadline = time.time() + float(remaining_time)
+            self.window_manager.set_shared_data("night_begin_deadline", shared_deadline)
+
+        self.deadline = shared_deadline
+        self.remaining = max(0, int(self.deadline - time.time()))
         self.timer_label.setText(f"⏱️ {self.remaining}s")
-        self.start_timer()
+        if self.remaining > 0:
+            self.start_timer()
+        else:
+            # Don't auto-close; wait for PHASE_NIGHT to be handled by RoomWindow
+            self.accept_or_close()
 
     def setup_ui(self):
         main_layout = QtWidgets.QVBoxLayout(self)
@@ -100,7 +109,11 @@ class NightBeginWindow(QtWidgets.QWidget):
         self.timer.start(1000)
 
     def _tick(self):
-        self.remaining -= 1
+        if self.deadline is not None:
+            self.remaining = max(0, int(self.deadline - time.time()))
+        else:
+            self.remaining = max(0, self.remaining - 1)
+
         if self.remaining > 0:
             self.timer_label.setText(f"⏱️ {self.remaining}s")
         else:
