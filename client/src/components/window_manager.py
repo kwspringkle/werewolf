@@ -46,8 +46,10 @@ class WindowManager(QtCore.QObject):
         if data and hasattr(new_window, 'set_data'):
             new_window.set_data(data)
         
-        # Set kích thước nhất quán
-        new_window.resize(WindowManager.DEFAULT_WIDTH, WindowManager.DEFAULT_HEIGHT)
+        # Set kích thước nhất quán (trừ khi window muốn tự control size, ví dụ in-game overlay screens)
+        use_default_size = getattr(new_window, "use_default_size", True)
+        if use_default_size:
+            new_window.resize(WindowManager.DEFAULT_WIDTH, WindowManager.DEFAULT_HEIGHT)
         
         # Set vị trí: giữ nguyên vị trí nếu có, nếu không thì center màn hình lần đầu
         if saved_x is not None and saved_y is not None:
@@ -61,8 +63,10 @@ class WindowManager(QtCore.QObject):
             new_window.move(x, y)
             self.window_position_set = True
         
-        # Đảm bảo window flags cho phép nhận input
-        new_window.setWindowFlags(QtCore.Qt.Window)
+        # Đảm bảo window flags cho phép nhận input (trừ khi window muốn tự control flags)
+        preserve_window_flags = getattr(new_window, "preserve_window_flags", False)
+        if not preserve_window_flags:
+            new_window.setWindowFlags(QtCore.Qt.Window)
         
         # Hiển thị và focus window
         new_window.show()

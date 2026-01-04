@@ -32,18 +32,41 @@ class DayChatWindow(QtWidgets.QWidget):
         # Set username in header
         if self.my_username:
             self.user_header.set_username(self.my_username)
+        
+        # Check if player is alive
+        players = self.window_manager.get_shared_data("room_players", [])
+        my_is_alive = True
+        for p in players:
+            if isinstance(p, dict):
+                if p.get("username") == self.my_username:
+                    my_is_alive = bool(p.get("is_alive", 1))
+                    break
+        
+        # Disable input if dead
+        if not my_is_alive:
+            self.input_box.setEnabled(False)
+            self.input_box.setPlaceholderText("❌ You cannot send messages since you are dead")
+            self.input_box.setStyleSheet("background:#333333; border:1px solid #555555; color:#888888; padding:8px; border-radius:8px;")
+            self.send_btn.setEnabled(False)
+            print(f"[DEBUG] Player {self.my_username} is dead - chat disabled")
+        else:
+            self.input_box.setEnabled(True)
+            self.input_box.setPlaceholderText("Type a message...")
+            self.input_box.setStyleSheet("background:#0f1a2e; border:1px solid #0f3460; color:#eaeaea; padding:8px; border-radius:8px;")
+            print(f"[DEBUG] Player {self.my_username} is alive - chat enabled")
 
         # Packets are received by RoomWindow; this window only renders chat UI.
 
         # Add a welcome message to show chat is working
         QtCore.QTimer.singleShot(100, lambda: self.append_message("System", "Day phase started. Discuss who might be a werewolf!"))
 
-        # Force focus on input box after window is shown
-        def set_input_focus():
-            print(f"[DEBUG] Setting focus on input box - enabled: {self.input_box.isEnabled()}, visible: {self.input_box.isVisible()}")
-            self.input_box.setFocus()
-            print(f"[DEBUG] Input box has focus: {self.input_box.hasFocus()}")
-        QtCore.QTimer.singleShot(200, set_input_focus)
+        # Force focus on input box after window is shown (only if alive)
+        if my_is_alive:
+            def set_input_focus():
+                print(f"[DEBUG] Setting focus on input box - enabled: {self.input_box.isEnabled()}, visible: {self.input_box.isVisible()}")
+                self.input_box.setFocus()
+                print(f"[DEBUG] Input box has focus: {self.input_box.hasFocus()}")
+            QtCore.QTimer.singleShot(200, set_input_focus)
         
     def hideEvent(self, event):
         """Called when window is hidden"""
@@ -363,10 +386,10 @@ class DayChatWindow(QtWidgets.QWidget):
                     self.window_manager.set_shared_data("current_room_id", None)
                     self.window_manager.set_shared_data("current_room_name", None)
                     self.window_manager.set_shared_data("is_host", False)
+                    self.window_manager.set_shared_data("connected", False)
                 
-                # Disconnect from server
-                if self.network_client:
-                    self.network_client.disconnect()
+                # KHÔNG disconnect network_client - chỉ clear session
+                # Network client vẫn giữ kết nối để có thể login lại
                 
                 # Navigate to welcome
                 if self.window_manager:
@@ -375,4 +398,22 @@ class DayChatWindow(QtWidgets.QWidget):
             except Exception as e:
                 if self.toast_manager:
                     self.toast_manager.error(f"Logout error: {str(e)}")
+    
+    def closeEvent(self, event):
+        """Xử lý khi đóng cửa sổ - cleanup network client"""
+        if self.connection_monitor:
+            self.connection_monitor.stop()
+        
+        # Cleanup network client giống như Ctrl+C
+        print("[DEBUG] Day chat window closing, cleaning up...")
+        try:
+            if self.network_client:
+                self.network_client.disconnect()
+                self.network_client.destroy()
+        except Exception as e:
+            print(f"[ERROR] Error during day chat cleanup: {e}")
+        
+        event.accept()
+        # Quit application
+        QtWidgets.QApplication.instance().quit()
 

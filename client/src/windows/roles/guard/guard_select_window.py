@@ -4,6 +4,9 @@ class GuardSelectWindow(QtWidgets.QWidget):
     """Guard selection screen styled like RoleCardWindow, with countdown"""
     def __init__(self, players, my_username, duration_seconds=30, network_client=None, room_id=None, parent=None):
         super().__init__(parent)
+        # Regular window with standard controls
+        self.use_default_size = True
+        self.preserve_window_flags = False
         self.players = players
         self.my_username = my_username
         self.duration = duration_seconds
@@ -13,8 +16,7 @@ class GuardSelectWindow(QtWidgets.QWidget):
         self.selected_username = None
         self.setObjectName("guard_select_window")
         self.setWindowTitle("Guard — Protect a player")
-        self.setFixedSize(500, 700)  # Tăng chiều cao để hiển thị nhiều players hơn
-        self.setWindowFlags(QtCore.Qt.Dialog | QtCore.Qt.FramelessWindowHint)
+        self.resize(500, 700)  # Tăng chiều cao để hiển thị nhiều players hơn
         self.setup_ui()
         self.start_timer()
 

@@ -1,9 +1,16 @@
 from PyQt5 import QtWidgets, QtCore
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from components.user_header import UserHeader
 
 class DeathAnnouncementWindow(QtWidgets.QWidget):
     """Window hiển thị danh sách người chết sau đêm (10 giây)"""
     def __init__(self, toast_manager=None, window_manager=None):
         super().__init__()
+        # WindowManager should not override size/flags for this in-game overlay screen.
+        self.use_default_size = False
+        self.preserve_window_flags = True
         self.toast_manager = toast_manager
         self.window_manager = window_manager
         self.duration = 10
@@ -13,24 +20,43 @@ class DeathAnnouncementWindow(QtWidgets.QWidget):
         self.setObjectName("death_announcement_window")
         self.setWindowTitle("Night Results")
         self.setFixedSize(600, 500)
+        self.setWindowFlags(QtCore.Qt.Window | QtCore.Qt.FramelessWindowHint)
         self.setup_ui()
         
     def set_dead_players(self, dead_players):
         """Set danh sách người chết và cập nhật UI"""
-        self.dead_players = dead_players
-        self.update_death_list()
+        print(f"[DEBUG] DeathAnnouncementWindow.set_dead_players called with: {dead_players}")
+        self.dead_players = dead_players if dead_players else []
+        # Update ngay nếu UI đã được setup
+        if hasattr(self, 'death_list_label'):
+            self.update_death_list()
+        else:
+            print("[DEBUG] UI not ready yet, will update in showEvent")
         
     def showEvent(self, event):
         """Called when window is shown"""
         super().showEvent(event)
+        # Set username cho user_header
+        username = self.window_manager.get_shared_data("username", "Player")
+        self.user_header.set_username(username)
         self.remaining = self.duration
         self.timer_label.setText(f"⏱️ {self.remaining}s")
+        
+        # Update death list khi window được show
+        print(f"[DEBUG] DeathAnnouncementWindow.showEvent - dead_players: {self.dead_players}")
+        self.update_death_list()
+        
         self.start_timer()
         
     def setup_ui(self):
         main_layout = QtWidgets.QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
+        
+        # User header (username + logout)
+        self.user_header = UserHeader(self)
+        self.user_header.logout_clicked.connect(self.on_logout)
+        main_layout.addWidget(self.user_header)
 
         card = QtWidgets.QFrame()
         card.setObjectName("death_announcement_card")
@@ -100,17 +126,21 @@ class DeathAnnouncementWindow(QtWidgets.QWidget):
         
         card_layout.addWidget(self.death_list_container)
 
-        card_layout.addStretch()
-        main_layout.addWidget(card)
-
-    def update_death_list(self):
-        """Cập nhật danh sách người chết"""
-        if not self.dead_players:
+        print(f"[DEBUG] update_death_list called - dead_players: {self.dead_players}")
+        
+        if not self.dead_players or len(self.dead_players) == 0:
             self.death_list_label.setText("No one died last night.")
             self.death_list_label.setStyleSheet("""
                 font-size: 24px;
                 color: #2ecc71;
                 font-weight: bold;
+                padding: 20px;
+            """)
+            print("[DEBUG] No deaths - showing 'No one died' message")
+        else:
+            # Hiển thị danh sách người chết
+            death_text = "\n".join([f"💀 {username}" for username in self.dead_players])
+            print(f"[DEBUG] Deaths detected - showing: {death_text}"
                 padding: 20px;
             """)
         else:
@@ -148,4 +178,41 @@ class DeathAnnouncementWindow(QtWidgets.QWidget):
         if hasattr(self, 'timer'):
             self.timer.stop()
         event.accept()
+    
+    def on_logout(self):
+        """Handle logout button click"""
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Logout",
+            "Are you sure you want to logout? You will leave the game.",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No
+        )
+        
+        if reply == QtWidgets.QMessageBox.Yes:
+            try:
+                # Send logout request
+                network_client = self.window_manager.get_shared_data("network_client")
+                if network_client:
+                    network_client.send_packet(105, {})  # LOGOUT_REQ
+                if self.toast_manager:
+                    self.toast_manager.info("Logging out...")
+                
+                # Stop timer
+                if hasattr(self, 'timer'):
+                    self.timer.stop()
+                
+                # Clear shared data
+                self.window_manager.set_shared_data("user_id", None)
+                self.window_manager.set_shared_data("username", None)
+                self.window_manager.set_shared_data("current_room_id", None)
+                self.window_manager.set_shared_data("is_host", False)
+                self.window_manager.set_shared_data("connected", False)
+
+                # Navigate to welcome screen
+                self.window_manager.navigate_to("welcome")
+
+            except Exception as e:
+                if self.toast_manager:
+                    self.toast_manager.error(f"Logout error: {str(e)}")
 

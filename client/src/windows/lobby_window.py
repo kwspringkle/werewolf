@@ -468,12 +468,33 @@ class LobbyWindow(QtWidgets.QWidget):
                 # Clear shared data
                 self.window_manager.set_shared_data("user_id", None)
                 self.window_manager.set_shared_data("username", None)
+                self.window_manager.set_shared_data("connected", False)
 
-                # Disconnect from server
-                self.network_client.disconnect()
+                # KHÔNG disconnect network_client - chỉ clear session
+                # Network client vẫn giữ kết nối để có thể login lại
 
                 # Navigate to welcome
                 self.window_manager.navigate_to("welcome")
 
             except Exception as e:
                 self.toast_manager.error(f"Logout error: {str(e)}")
+    
+    def closeEvent(self, event):
+        """Xử lý khi đóng cửa sổ - cleanup network client"""
+        self.recv_timer.stop()
+        self.auto_refresh_timer.stop()
+        if self.connection_monitor:
+            self.connection_monitor.stop()
+        
+        # Cleanup network client giống như Ctrl+C
+        print("[DEBUG] Lobby window closing, cleaning up...")
+        try:
+            if self.network_client:
+                self.network_client.disconnect()
+                self.network_client.destroy()
+        except Exception as e:
+            print(f"[ERROR] Error during lobby cleanup: {e}")
+        
+        event.accept()
+        # Quit application
+        QtWidgets.QApplication.instance().quit()

@@ -10,10 +10,12 @@ class SeerResultWindow(QtWidgets.QWidget):
     """Show seer result styled like RoleCardWindow"""
     def __init__(self, target_username, is_werewolf, parent=None):
         super().__init__(parent)
+        # Regular window with standard controls
+        self.use_default_size = True
+        self.preserve_window_flags = False
         self.setObjectName("seer_result_window")
         self.setWindowTitle("Seer Result")
-        self.setFixedSize(500, 600)
-        self.setWindowFlags(QtCore.Qt.Dialog | QtCore.Qt.FramelessWindowHint)
+        self.resize(500, 600)
         self.setup_ui(target_username, is_werewolf)
 
     def setup_ui(self, target_username, is_werewolf):

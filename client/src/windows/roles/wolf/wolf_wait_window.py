@@ -4,12 +4,14 @@ class WolfWaitWindow(QtWidgets.QWidget):
     """Non-wolf players see this while Wolves are choosing, styled like RoleCardWindow"""
     def __init__(self, duration_seconds=30, parent=None):
         super().__init__(parent)
+        # Regular window with standard controls
+        self.use_default_size = True
+        self.preserve_window_flags = False
         self.duration = duration_seconds
         self.remaining = duration_seconds
         self.setObjectName("wolf_wait_window")
         self.setWindowTitle("Night — Wolves are choosing")
-        self.setFixedSize(500, 600)
-        self.setWindowFlags(QtCore.Qt.Dialog | QtCore.Qt.FramelessWindowHint)
+        self.resize(500, 600)
         self.setup_ui()
         self.start_timer()
 

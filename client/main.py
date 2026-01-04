@@ -16,8 +16,17 @@ from windows.login_window import LoginWindow
 from windows.lobby_window import LobbyWindow
 from windows.room_window import RoomWindow
 from windows.role_card_window import RoleCardWindow
+from windows.night_begin_window import NightBeginWindow
 from windows.death_announcement_window import DeathAnnouncementWindow
 from windows.day_chat_window import DayChatWindow
+from windows.roles.seer.seer_select_window import SeerSelectWindow
+from windows.roles.seer.seer_wait_window import SeerWaitWindow
+from windows.roles.seer.seer_result_window import SeerResultWindow
+from windows.roles.guard.guard_select_window import GuardSelectWindow
+from windows.roles.guard.guard_wait_window import GuardWaitWindow
+from windows.roles.wolf.wolf_select_window import WolfSelectWindow
+from windows.roles.wolf.wolf_wait_window import WolfWaitWindow
+from windows.roles.wolf.wolf_chat_window import WolfChatWindow
 
 
 class WerewolfApplication:    
@@ -98,6 +107,11 @@ class WerewolfApplication:
             self.toast_manager,
             self.window_manager
         )
+
+        self.night_begin_window = NightBeginWindow(
+            self.toast_manager,
+            self.window_manager
+        )
         
         self.death_announcement_window = DeathAnnouncementWindow(
             self.toast_manager,
@@ -108,6 +122,17 @@ class WerewolfApplication:
             self.toast_manager,
             self.window_manager
         )
+
+        # In-game overlay screens (night roles). These instances will be refreshed/overwritten by NightPhaseController as needed,
+        # but registering defaults here avoids "window not registered" when navigating.
+        self.window_manager.register_window("seer_select", SeerSelectWindow([], "", 30, None, None))
+        self.window_manager.register_window("seer_wait", SeerWaitWindow(30))
+        self.window_manager.register_window("seer_result", SeerResultWindow("", False))
+        self.window_manager.register_window("guard_select", GuardSelectWindow([], "", 30, None, None))
+        self.window_manager.register_window("guard_wait", GuardWaitWindow(30))
+        self.window_manager.register_window("wolf_select", WolfSelectWindow([], [], "", 60, None, None))
+        self.window_manager.register_window("wolf_wait", WolfWaitWindow(60))
+        self.window_manager.register_window("wolf_chat", WolfChatWindow("", [], duration_seconds=60))
         
         # Đăng ký các cửa sổ
         self.window_manager.register_window("welcome", self.welcome_window)
@@ -116,6 +141,7 @@ class WerewolfApplication:
         self.window_manager.register_window("lobby", self.lobby_window)
         self.window_manager.register_window("room", self.room_window)
         self.window_manager.register_window("role_card", self.role_card_window)
+        self.window_manager.register_window("night_begin", self.night_begin_window)
         self.window_manager.register_window("death_announcement", self.death_announcement_window)
         self.window_manager.register_window("day_chat", self.day_chat_window)
         

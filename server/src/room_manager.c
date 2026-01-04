@@ -333,10 +333,10 @@ void check_wolf_phase_timeout() {
                 }
                 
                 rooms[i].wolf_kill_done = 1;
-                
+            
                 // Kết thúc night phase
-                rooms[i].night_phase_active = 0;
-                
+            rooms[i].night_phase_active = 0;
+            
                 // Gửi compact result thay vì large dead_players array
                 cJSON *result_obj = cJSON_CreateObject();
                 cJSON_AddStringToObject(result_obj, "type", "phase_day");

@@ -4,10 +4,12 @@ class WolfChatWindow(QtWidgets.QWidget):
     """Styled wolf chat (card-like, timer)"""
     def __init__(self, my_username, wolf_usernames, send_callback=None, duration_seconds=30, network_client=None, room_id=None, parent=None):
         super().__init__(parent)
+        # Regular window with standard controls
+        self.use_default_size = True
+        self.preserve_window_flags = False
         self.setObjectName("wolf_chat_window")
         self.setWindowTitle("Wolf Chat")
-        self.setFixedSize(500, 600)
-        self.setWindowFlags(QtCore.Qt.Dialog | QtCore.Qt.FramelessWindowHint)
+        self.resize(500, 600)
         self.send_callback = send_callback
         self.my_username = my_username
         self.wolf_usernames = wolf_usernames
@@ -60,8 +62,8 @@ class WolfChatWindow(QtWidgets.QWidget):
         self.switch_btn.setMinimumHeight(28)
         self.switch_btn.setStyleSheet("""
             QPushButton {
-                background-color: #555555;
-                color: #888888;
+                background-color: #e94560;
+                color: white;
                 border: none;
                 border-radius: 5px;
                 font-weight: bold;
@@ -69,11 +71,10 @@ class WolfChatWindow(QtWidgets.QWidget):
                 padding: 6px 12px;
             }
             QPushButton:hover {
-                background-color: #666666;
-                color: #999999;
+                background-color: #ff5770;
             }
             QPushButton:pressed {
-                background-color: #444444;
+                background-color: #d63851;
             }
         """)
         header_h.addWidget(self.switch_btn)
@@ -219,9 +220,9 @@ class WolfChatWindow(QtWidgets.QWidget):
         bubble.setContentsMargins(10, 8, 10, 8)
         bubble.setMaximumWidth(360)
         if is_self:
-            bubble.setStyleSheet("background:#2ecc71; color:#062b1a; padding:8px; border-radius:12px;")
-        else:
             bubble.setStyleSheet("background:#e94560; color:white; padding:8px; border-radius:12px;")
+        else:
+            bubble.setStyleSheet("background:#3498db; color:white; padding:8px; border-radius:12px;")
         v.addWidget(bubble, alignment=QtCore.Qt.AlignLeft if not is_self else QtCore.Qt.AlignRight)
 
         # Wrap into hbox to align left or right

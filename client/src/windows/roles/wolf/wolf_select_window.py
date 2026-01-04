@@ -1,6 +1,6 @@
 from PyQt5 import QtWidgets, QtCore
 
-class WolfSelectWindow(QtWidgets.QDialog):
+class WolfSelectWindow(QtWidgets.QWidget):
     """Wolf selection window: choose a living target to bite (UI-only selection until submit)."""
 
     _CARD_STYLE_ALIVE = """
@@ -37,6 +37,9 @@ class WolfSelectWindow(QtWidgets.QDialog):
         parent=None,
     ):
         super().__init__(parent)
+        # Regular window with standard controls
+        self.use_default_size = True
+        self.preserve_window_flags = False
         self.player_list = player_list
         self.alive_status = alive_status
         self.my_username = my_username
@@ -48,8 +51,7 @@ class WolfSelectWindow(QtWidgets.QDialog):
 
         self.setObjectName("wolf_select_window")
         self.setWindowTitle("Wolf — Choose a victim")
-        self.setFixedSize(500, 600)
-        self.setWindowFlags(QtCore.Qt.Dialog | QtCore.Qt.FramelessWindowHint)
+        self.resize(500, 600)
         self.setup_ui()
         self.start_timer()
 

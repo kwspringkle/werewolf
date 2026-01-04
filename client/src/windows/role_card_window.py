@@ -1,5 +1,9 @@
 from PyQt5 import QtWidgets, QtCore, QtGui
 import time
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from components.user_header import UserHeader
 
 class RoleCardWindow(QtWidgets.QWidget):
     """Window hiển thị role card với timer 30s"""
@@ -24,6 +28,10 @@ class RoleCardWindow(QtWidgets.QWidget):
         # Lấy network client từ shared data
         self.network_client = self.window_manager.get_shared_data("network_client")
         self.room_id = self.window_manager.get_shared_data("current_room_id")
+        
+        # Set username cho user_header
+        username = self.window_manager.get_shared_data("username", "Player")
+        self.user_header.set_username(username)
         
         # Lấy role_data từ shared data nếu có
         role_info = self.window_manager.get_shared_data("role_info", {})
@@ -115,6 +123,11 @@ class RoleCardWindow(QtWidgets.QWidget):
         main_layout = QtWidgets.QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
+        
+        # User header (username + logout)
+        self.user_header = UserHeader(self)
+        self.user_header.logout_clicked.connect(self.on_logout)
+        main_layout.addWidget(self.user_header)
         
         # Main card container
         card = QtWidgets.QFrame()
@@ -301,14 +314,11 @@ class RoleCardWindow(QtWidgets.QWidget):
         # Dừng timer
         if hasattr(self, 'countdown_timer'):
             self.countdown_timer.stop()
-        # Ready: gửi ROLE_CARD_DONE_REQ và đợi PHASE_NIGHT từ server (không navigate night_begin)
-        self.send_timeout_and_wait()
+        # Ready: gửi ROLE_CARD_DONE_REQ và navigate đến night_begin (logic cũ)
+        self.send_ready_and_navigate()
         
     def send_ready_and_navigate(self):
-        """
-        Backward compatible wrapper (deprecated):
-        historically navigated to night_begin, but we no longer use that window.
-        """
+        """Gửi ROLE_CARD_DONE_REQ và navigate đến night_begin window (logic cũ)"""
         elapsed_time = time.time() - self.start_time
         remaining_night_time = max(0, self.total_time - elapsed_time)  # Thời gian còn lại cho night begin
         
@@ -321,7 +331,11 @@ class RoleCardWindow(QtWidgets.QWidget):
                 print(f"[DEBUG] Sent ROLE_CARD_DONE_REQ to server")
             except Exception as e:
                 print(f"[ERROR] Failed to notify server ROLE_CARD_DONE_REQ: {e}")
-        # Do not navigate; wait for PHASE_NIGHT from server.
+        
+        # Navigate đến night_begin window (nếu có WindowManager)
+        if self.window_manager:
+            self.window_manager.set_shared_data("night_begin_remaining_time", int(remaining_night_time))
+            self.window_manager.navigate_to("night_begin")
         
     def send_timeout_and_wait(self):
         """Gửi ROLE_CARD_DONE_REQ khi hết thời gian và đợi PHASE_NIGHT từ server"""
@@ -344,3 +358,39 @@ class RoleCardWindow(QtWidgets.QWidget):
             self.countdown_timer.stop()
         # Note: ROLE_CARD_DONE_REQ đã được gửi trong send_ready_and_close() hoặc update_timer()
         event.accept()
+    
+    def on_logout(self):
+        """Handle logout button click"""
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Logout",
+            "Are you sure you want to logout? You will leave the game.",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No
+        )
+        
+        if reply == QtWidgets.QMessageBox.Yes:
+            try:
+                # Send logout request
+                if self.network_client:
+                    self.network_client.send_packet(105, {})  # LOGOUT_REQ
+                if self.toast_manager:
+                    self.toast_manager.info("Logging out...")
+                
+                # Stop timer
+                if hasattr(self, 'countdown_timer'):
+                    self.countdown_timer.stop()
+                
+                # Clear shared data
+                self.window_manager.set_shared_data("user_id", None)
+                self.window_manager.set_shared_data("username", None)
+                self.window_manager.set_shared_data("current_room_id", None)
+                self.window_manager.set_shared_data("is_host", False)
+                self.window_manager.set_shared_data("connected", False)
+
+                # Navigate to welcome screen
+                self.window_manager.navigate_to("welcome")
+
+            except Exception as e:
+                if self.toast_manager:
+                    self.toast_manager.error(f"Logout error: {str(e)}")

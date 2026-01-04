@@ -721,6 +721,7 @@ class RoomWindow(QtWidgets.QWidget):
                 if result == "killed" and target:
                     dead_players = [target]
                 print(f"[DEBUG] PHASE_DAY compact result: {result}, target={target}")
+                print(f"[DEBUG] dead_players array: {dead_players}")
             else:
                 dead_players = payload.get("dead_players", [])
                 print(f"[DEBUG] Dead players (legacy): {dead_players}")
@@ -763,10 +764,13 @@ class RoomWindow(QtWidgets.QWidget):
             
             # Hiển thị death announcement window
             if "death_announcement" in self.window_manager.windows:
+                print(f"[DEBUG] Navigating to death_announcement with dead_players: {dead_players}")
+                # Navigate trước
+                self.window_manager.navigate_to("death_announcement")
+                # Sau đó set dead players (sau khi window đã được show)
                 death_window = self.window_manager.windows["death_announcement"]
                 death_window.set_dead_players(dead_players)
-                # Use WindowManager so countdown can auto-navigate to day chat and auto-hide this screen.
-                self.window_manager.navigate_to("death_announcement")
+                print(f"[DEBUG] Called set_dead_players on death_announcement_window")
             else:
                 print("[ERROR] Death announcement window not registered")
                 # Fallback: navigate directly to day chat
@@ -898,7 +902,37 @@ class RoomWindow(QtWidgets.QWidget):
                 self.window_manager.set_shared_data("user_id", None)
                 self.window_manager.set_shared_data("username", None)
                 self.window_manager.set_shared_data("current_room_id", None)
+                self.window_manager.set_shared_data("is_host", False)
+                self.window_manager.set_shared_data("connected", False)
+
+                # KHÔNG disconnect network_client - chỉ clear session
+                # Network client vẫn giữ kết nối để có thể login lại
+
+                # Navigate to welcome screen
+                self.window_manager.navigate_to("welcome")
+
+            except Exception as e:
+                self.toast_manager.error(f"Logout error: {str(e)}")
                 self.window_manager.set_shared_data("current_room_name", None)
+    
+    def closeEvent(self, event):
+        """Xử lý khi đóng cửa sổ - cleanup network client"""
+        self.recv_timer.stop()
+        if self.connection_monitor:
+            self.connection_monitor.stop()
+        
+        # Cleanup network client giống như Ctrl+C
+        print("[DEBUG] Room window closing, cleaning up...")
+        try:
+            if self.network_client:
+                self.network_client.disconnect()
+                self.network_client.destroy()
+        except Exception as e:
+            print(f"[ERROR] Error during room cleanup: {e}")
+        
+        event.accept()
+        # Quit application
+        QtWidgets.QApplication.instance().quit()
                 self.window_manager.set_shared_data("is_host", False)
                 
                 # Disconnect from server

@@ -4,6 +4,9 @@ class SeerSelectWindow(QtWidgets.QWidget):
     """Seer selection screen styled like RoleCardWindow, with countdown"""
     def __init__(self, players, my_username, duration_seconds=30, network_client=None, room_id=None, parent=None):
         super().__init__(parent)
+        # Regular window with standard controls
+        self.use_default_size = True
+        self.preserve_window_flags = False
         self.players = players
         self.my_username = my_username
         self.duration = duration_seconds
@@ -13,8 +16,7 @@ class SeerSelectWindow(QtWidgets.QWidget):
         self.selected_username = None
         self.setObjectName("seer_select_window")
         self.setWindowTitle("Seer — Pick a player")
-        self.setFixedSize(500, 600)
-        self.setWindowFlags(QtCore.Qt.Dialog | QtCore.Qt.FramelessWindowHint)
+        self.resize(500, 600)
         self.setup_ui()
         self.start_timer()
 
@@ -60,6 +62,12 @@ class SeerSelectWindow(QtWidgets.QWidget):
         title_label.setAlignment(QtCore.Qt.AlignCenter)
         title_label.setStyleSheet("font-size: 22px; color: #f39c12; font-weight: bold;")
         self.card_layout.addWidget(title_label)
+        
+        # Subtitle hint
+        hint_label = QtWidgets.QLabel("💡 You cannot check yourself")
+        hint_label.setAlignment(QtCore.Qt.AlignCenter)
+        hint_label.setStyleSheet("font-size: 12px; color: #888888; margin-bottom: 5px;")
+        self.card_layout.addWidget(hint_label)
 
 
         # Grid chọn user dạng card nhỏ vuông như lobby
@@ -122,12 +130,37 @@ class SeerSelectWindow(QtWidgets.QWidget):
             name_label.setWordWrap(True)
             card_item_layout.addWidget(name_label)
 
-            # Chỉ make clickable nếu player còn sống
-            if is_alive:
+            # Check nếu là chính mình (seer)
+            is_self = (uname == self.my_username)
+            
+            if is_self:
+                # Disable card của chính mình với style khác
+                card_item.setStyleSheet("""
+                    QFrame#user_card {
+                        background-color: #2a2a3e;
+                        border: 2px solid #666666;
+                        border-radius: 10px;
+                        opacity: 0.7;
+                    }
+                """)
+                # Thay đổi icon và text
+                icon_label.setText("🔮")  # Crystal ball icon cho seer
+                name_label.setText(f"{uname}\n(You)")
+                name_label.setStyleSheet("""
+                    font-size: 11px;
+                    font-weight: bold;
+                    color: #f39c12;
+                    padding: 2px;
+                    background-color: transparent;
+                """)
+                card_item.setCursor(QtCore.Qt.ForbiddenCursor)
+                card_item.setEnabled(False)
+            elif is_alive:
+                # Chỉ make clickable nếu player còn sống và không phải chính mình
                 card_item.mousePressEvent = self._make_card_click(card_item, uname)
                 card_item.setCursor(QtCore.Qt.PointingHandCursor)
             else:
-                # Dead player: không thể click, cursor mặc định
+                # Dead player: không thể click
                 card_item.setCursor(QtCore.Qt.ForbiddenCursor)
                 # Disable card để không thể tương tác
                 card_item.setEnabled(False)
