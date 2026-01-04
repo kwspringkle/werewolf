@@ -44,14 +44,13 @@ class NightPhaseController:
             print(f"[DEBUG] Seer select - total players: {len(self.players)}")
             try:
                 self.seer_window = SeerSelectWindow(self.players, self.my_username, self.seer_duration, self.network_client, self.room_id)
-                self.seer_window.setWindowModality(QtCore.Qt.ApplicationModal)
                 # Center the window on screen
                 screen = QtWidgets.QApplication.desktop().screenGeometry()
                 window_geometry = self.seer_window.frameGeometry()
                 window_geometry.moveCenter(screen.center())
                 self.seer_window.move(window_geometry.topLeft())
                 # Show window with all flags to ensure it's visible
-                self.seer_window.setWindowFlags(QtCore.Qt.Dialog | QtCore.Qt.FramelessWindowHint)
+                self.seer_window.setWindowFlags(QtCore.Qt.Window | QtCore.Qt.FramelessWindowHint)
                 self.seer_window.show()
                 self.seer_window.raise_()
                 self.seer_window.activateWindow()
@@ -74,14 +73,13 @@ class NightPhaseController:
             print("[DEBUG] User is not seer - creating and showing SeerWaitWindow")
             try:
                 self.seer_window = SeerWaitWindow(self.seer_duration)
-                self.seer_window.setWindowModality(QtCore.Qt.ApplicationModal)
                 # Center the window on screen
                 screen = QtWidgets.QApplication.desktop().screenGeometry()
                 window_geometry = self.seer_window.frameGeometry()
                 window_geometry.moveCenter(screen.center())
                 self.seer_window.move(window_geometry.topLeft())
                 # Show window with all flags to ensure it's visible
-                self.seer_window.setWindowFlags(QtCore.Qt.Dialog | QtCore.Qt.FramelessWindowHint)
+                self.seer_window.setWindowFlags(QtCore.Qt.Window | QtCore.Qt.FramelessWindowHint)
                 self.seer_window.show()
                 self.seer_window.raise_()
                 self.seer_window.activateWindow()
@@ -127,12 +125,13 @@ class NightPhaseController:
         
         # Show result window
         self.seer_result_window = SeerResultWindow(target_username, is_werewolf)
-        self.seer_result_window.setWindowModality(QtCore.Qt.ApplicationModal)
+        # Non-modal so multiple client windows can be displayed side-by-side on the same machine.
         # Center the window on screen
         screen = QtWidgets.QApplication.desktop().screenGeometry()
         window_geometry = self.seer_result_window.frameGeometry()
         window_geometry.moveCenter(screen.center())
         self.seer_result_window.move(window_geometry.topLeft())
+        self.seer_result_window.setWindowFlags(QtCore.Qt.Window | QtCore.Qt.FramelessWindowHint)
         self.seer_result_window.show()
         self.seer_result_window.raise_()
         self.seer_result_window.activateWindow()
@@ -186,12 +185,13 @@ class NightPhaseController:
             print(f"[DEBUG] Guard select - full players data: {self.players}")
             # Đảm bảo truyền TẤT CẢ players vào GuardSelectWindow, không filter
             self.guard_window = GuardSelectWindow(self.players, self.my_username, self.guard_duration, self.network_client, self.room_id)
-            self.guard_window.setWindowModality(QtCore.Qt.ApplicationModal)
+            # Non-modal so multiple client windows can be displayed side-by-side.
             # Center the window on screen
             screen = QtWidgets.QApplication.desktop().screenGeometry()
             window_geometry = self.guard_window.frameGeometry()
             window_geometry.moveCenter(screen.center())
             self.guard_window.move(window_geometry.topLeft())
+            self.guard_window.setWindowFlags(QtCore.Qt.Window | QtCore.Qt.FramelessWindowHint)
             self.guard_window.show()
             self.guard_window.raise_()
             self.guard_window.activateWindow()
@@ -201,12 +201,13 @@ class NightPhaseController:
         else:
             print("[DEBUG] User is not guard - showing GuardWaitWindow")
             self.guard_window = GuardWaitWindow(self.guard_duration)
-            self.guard_window.setWindowModality(QtCore.Qt.ApplicationModal)
+            # Non-modal so multiple client windows can be displayed side-by-side.
             # Center the window on screen
             screen = QtWidgets.QApplication.desktop().screenGeometry()
             window_geometry = self.guard_window.frameGeometry()
             window_geometry.moveCenter(screen.center())
             self.guard_window.move(window_geometry.topLeft())
+            self.guard_window.setWindowFlags(QtCore.Qt.Window | QtCore.Qt.FramelessWindowHint)
             self.guard_window.show()
             self.guard_window.raise_()
             self.guard_window.activateWindow()
@@ -288,12 +289,13 @@ class NightPhaseController:
                         network_client=self.network_client,
                         room_id=self.room_id
                     )
-                    self.wolf_chat_window.setWindowModality(QtCore.Qt.ApplicationModal)
+                    # Non-modal so multiple client windows can be displayed side-by-side.
                     # Center chat window
                     screen = QtWidgets.QApplication.desktop().screenGeometry()
                     window_geometry = self.wolf_chat_window.frameGeometry()
                     window_geometry.moveCenter(screen.center())
                     self.wolf_chat_window.move(window_geometry.topLeft())
+                    self.wolf_chat_window.setWindowFlags(QtCore.Qt.Window | QtCore.Qt.FramelessWindowHint)
                     # Button để quay lại select window
                     if hasattr(self.wolf_chat_window, 'switch_btn'):
                         self.wolf_chat_window.switch_btn.clicked.connect(show_select)
@@ -316,7 +318,7 @@ class NightPhaseController:
             if hasattr(self.wolf_controller, 'chat_btn'):
                 self.wolf_controller.chat_btn.clicked.connect(show_chat)
             
-            self.wolf_controller.setWindowModality(QtCore.Qt.ApplicationModal)
+            # Non-modal so multiple client windows can be displayed side-by-side.
             # Center the window on screen
             screen = QtWidgets.QApplication.desktop().screenGeometry()
             window_geometry = self.wolf_controller.frameGeometry()
@@ -329,7 +331,7 @@ class NightPhaseController:
         else:
             print("[DEBUG] User is not wolf - showing WolfWaitWindow")
             self.wolf_controller = WolfWaitWindow(self.wolf_duration)
-            self.wolf_controller.setWindowModality(QtCore.Qt.ApplicationModal)
+            # Non-modal so multiple client windows can be displayed side-by-side.
             # Center the window on screen
             screen = QtWidgets.QApplication.desktop().screenGeometry()
             window_geometry = self.wolf_controller.frameGeometry()

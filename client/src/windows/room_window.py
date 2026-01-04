@@ -765,16 +765,8 @@ class RoomWindow(QtWidgets.QWidget):
             if "death_announcement" in self.window_manager.windows:
                 death_window = self.window_manager.windows["death_announcement"]
                 death_window.set_dead_players(dead_players)
-                # Set window flags để hiển thị như modal
-                death_window.setWindowFlags(QtCore.Qt.Dialog | QtCore.Qt.FramelessWindowHint)
-                # Center window trên màn hình
-                screen = QtWidgets.QApplication.desktop().screenGeometry()
-                window_geometry = death_window.frameGeometry()
-                window_geometry.moveCenter(screen.center())
-                death_window.move(window_geometry.topLeft())
-                death_window.show()
-                death_window.raise_()
-                death_window.activateWindow()
+                # Use WindowManager so countdown can auto-navigate to day chat and auto-hide this screen.
+                self.window_manager.navigate_to("death_announcement")
             else:
                 print("[ERROR] Death announcement window not registered")
                 # Fallback: navigate directly to day chat

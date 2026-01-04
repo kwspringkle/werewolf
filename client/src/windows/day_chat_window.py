@@ -352,8 +352,9 @@ class DayChatWindow(QtWidgets.QWidget):
                 if self.toast_manager:
                     self.toast_manager.info("Logging out...")
                 
-                # Stop timer
-                self.recv_timer.stop()
+                # Stop timer (legacy: this window no longer reads from socket directly)
+                if hasattr(self, "recv_timer") and self.recv_timer:
+                    self.recv_timer.stop()
                 
                 # Clear shared data
                 if self.window_manager:

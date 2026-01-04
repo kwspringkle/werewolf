@@ -1,5 +1,6 @@
 # Main file để chạy ứng dụng Werewolf
 import sys
+import signal
 from pathlib import Path
 from PyQt5 import QtWidgets, QtCore
 
@@ -15,7 +16,6 @@ from windows.login_window import LoginWindow
 from windows.lobby_window import LobbyWindow
 from windows.room_window import RoomWindow
 from windows.role_card_window import RoleCardWindow
-from windows.night_begin_window import NightBeginWindow
 from windows.death_announcement_window import DeathAnnouncementWindow
 from windows.day_chat_window import DayChatWindow
 
@@ -28,6 +28,10 @@ class WerewolfApplication:
         # Otherwise, if all main windows are hidden and the last dialog closes, Qt will quit,
         # triggering cleanup() and disconnecting the socket (looks like "random disconnects").
         self.app.setQuitOnLastWindowClosed(False)
+
+        # Graceful shutdown on Ctrl+C (SIGINT) / SIGTERM:
+        # make sure we quit the Qt loop so aboutToQuit->cleanup runs and socket disconnects cleanly.
+        self._install_signal_handlers()
         
         # Load stylesheet
         self.load_stylesheet()
@@ -95,11 +99,6 @@ class WerewolfApplication:
             self.window_manager
         )
         
-        self.night_begin_window = NightBeginWindow(
-            self.toast_manager,
-            self.window_manager
-        )
-        
         self.death_announcement_window = DeathAnnouncementWindow(
             self.toast_manager,
             self.window_manager
@@ -117,7 +116,6 @@ class WerewolfApplication:
         self.window_manager.register_window("lobby", self.lobby_window)
         self.window_manager.register_window("room", self.room_window)
         self.window_manager.register_window("role_card", self.role_card_window)
-        self.window_manager.register_window("night_begin", self.night_begin_window)
         self.window_manager.register_window("death_announcement", self.death_announcement_window)
         self.window_manager.register_window("day_chat", self.day_chat_window)
         
@@ -131,6 +129,32 @@ class WerewolfApplication:
         
         # Bắt đầu vòng lặp sự kiện
         return self.app.exec_()
+
+    def _install_signal_handlers(self):
+        """Install SIGINT/SIGTERM handler so Ctrl+C in terminal closes the client cleanly."""
+        # A small timer keeps the Python interpreter responsive to signals while Qt loop is running.
+        self._signal_timer = QtCore.QTimer()
+        self._signal_timer.start(250)
+        self._signal_timer.timeout.connect(lambda: None)
+
+        def _handle_sig(_signum, _frame):
+            try:
+                print("[DEBUG] Signal received, shutting down client...")
+            except Exception:
+                pass
+            try:
+                self.app.quit()
+            except Exception:
+                pass
+
+        try:
+            signal.signal(signal.SIGINT, _handle_sig)
+        except Exception:
+            pass
+        try:
+            signal.signal(signal.SIGTERM, _handle_sig)
+        except Exception:
+            pass
         
     def cleanup(self):
         """Dọn dẹp tài nguyên"""

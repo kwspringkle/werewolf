@@ -301,11 +301,14 @@ class RoleCardWindow(QtWidgets.QWidget):
         # Dừng timer
         if hasattr(self, 'countdown_timer'):
             self.countdown_timer.stop()
-        # Ready: gửi ROLE_CARD_DONE_REQ và navigate đến night_begin
-        self.send_ready_and_navigate()
+        # Ready: gửi ROLE_CARD_DONE_REQ và đợi PHASE_NIGHT từ server (không navigate night_begin)
+        self.send_timeout_and_wait()
         
     def send_ready_and_navigate(self):
-        """Gửi ROLE_CARD_DONE_REQ và navigate đến night_begin window"""
+        """
+        Backward compatible wrapper (deprecated):
+        historically navigated to night_begin, but we no longer use that window.
+        """
         elapsed_time = time.time() - self.start_time
         remaining_night_time = max(0, self.total_time - elapsed_time)  # Thời gian còn lại cho night begin
         
@@ -318,10 +321,7 @@ class RoleCardWindow(QtWidgets.QWidget):
                 print(f"[DEBUG] Sent ROLE_CARD_DONE_REQ to server")
             except Exception as e:
                 print(f"[ERROR] Failed to notify server ROLE_CARD_DONE_REQ: {e}")
-        
-        # Navigate đến night_begin window
-        self.window_manager.set_shared_data("night_begin_remaining_time", int(remaining_night_time))
-        self.window_manager.navigate_to("night_begin")
+        # Do not navigate; wait for PHASE_NIGHT from server.
         
     def send_timeout_and_wait(self):
         """Gửi ROLE_CARD_DONE_REQ khi hết thời gian và đợi PHASE_NIGHT từ server"""
