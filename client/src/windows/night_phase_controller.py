@@ -5,7 +5,6 @@ from .roles.seer.seer_result_window import SeerResultWindow
 from .roles.seer.seer_wait_window import SeerWaitWindow
 from .roles.guard.guard_select_window import GuardSelectWindow
 from .roles.guard.guard_wait_window import GuardWaitWindow
-from .roles.wolf.wolf_phase_controller import WolfPhaseController
 from .roles.wolf.wolf_wait_window import WolfWaitWindow
 
 
@@ -285,6 +284,7 @@ class NightPhaseController:
                     self.wolf_chat_window = WolfChatWindow(
                         self.my_username, self.wolf_usernames,
                         send_callback=send_wolf_chat,
+                        duration_seconds=getattr(self.wolf_controller, "remaining", self.wolf_duration),
                         network_client=self.network_client,
                         room_id=self.room_id
                     )
@@ -298,6 +298,9 @@ class NightPhaseController:
                     if hasattr(self.wolf_chat_window, 'switch_btn'):
                         self.wolf_chat_window.switch_btn.clicked.connect(show_select)
                 self.wolf_controller.hide()
+                # Sync countdown each time chat is opened (share the same remaining time)
+                if hasattr(self.wolf_chat_window, "sync_remaining"):
+                    self.wolf_chat_window.sync_remaining(getattr(self.wolf_controller, "remaining", self.wolf_duration))
                 self.wolf_chat_window.show()
                 self.wolf_chat_window.raise_()
                 self.wolf_chat_window.activateWindow()

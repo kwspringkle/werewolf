@@ -15,10 +15,8 @@ class DayChatWindow(QtWidgets.QWidget):
         self.setObjectName("day_chat_window")
         self.setWindowTitle("Werewolf - Day Phase")
         self.setup_ui()
-        
-        # Timer để receive packets
-        self.recv_timer = QtCore.QTimer()
-        self.recv_timer.timeout.connect(self.receive_packets)
+        # IMPORTANT: Do NOT read from network socket here.
+        # RoomWindow is the single consumer of packets and will dispatch CHAT_BROADCAST to this window.
         
     def showEvent(self, event):
         """Called when window is shown"""
@@ -35,8 +33,7 @@ class DayChatWindow(QtWidgets.QWidget):
         if self.my_username:
             self.user_header.set_username(self.my_username)
 
-        # Start receiving packets
-        self.recv_timer.start(100)
+        # Packets are received by RoomWindow; this window only renders chat UI.
 
         # Add a welcome message to show chat is working
         QtCore.QTimer.singleShot(100, lambda: self.append_message("System", "Day phase started. Discuss who might be a werewolf!"))
@@ -51,7 +48,18 @@ class DayChatWindow(QtWidgets.QWidget):
     def hideEvent(self, event):
         """Called when window is hidden"""
         super().hideEvent(event)
-        self.recv_timer.stop()
+        # No socket receive loop here.
+
+    def handle_chat_broadcast(self, payload: dict):
+        """Called by RoomWindow when receiving CHAT_BROADCAST (402)."""
+        if not isinstance(payload, dict):
+            return
+        chat_type = payload.get("chat_type", "day")
+        if chat_type != "day":
+            return
+        username = payload.get("username", "Unknown")
+        message = payload.get("message", "")
+        self.append_message(username, message)
         
     def setup_ui(self):
         """Thiết lập giao diện người dùng"""

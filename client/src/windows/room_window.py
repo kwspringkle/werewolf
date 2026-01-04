@@ -380,11 +380,30 @@ class RoomWindow(QtWidgets.QWidget):
         # Handle PING from server
         if header == 501:  # PING
             try:
-                self.network_client.send_packet(501, {"type": "pong"})
+                # Reply with proper PONG header (502). Payload is kept for compatibility/logging.
+                self.network_client.send_packet(502, {"type": "pong"})
                 if self.connection_monitor:
                     self.connection_monitor.on_pong_received()
             except:
                 pass
+            return
+
+        # CHAT_BROADCAST (centralized receive to avoid multiple windows stealing packets)
+        if header == 402:  # CHAT_BROADCAST
+            try:
+                chat_type = payload.get("chat_type", "day") if isinstance(payload, dict) else "day"
+
+                if chat_type == "wolf":
+                    night_ctrl = self.window_manager.get_shared_data("night_phase_controller")
+                    wolf_chat = getattr(night_ctrl, "wolf_chat_window", None) if night_ctrl else None
+                    if wolf_chat and hasattr(wolf_chat, "handle_chat_broadcast"):
+                        wolf_chat.handle_chat_broadcast(payload)
+                else:
+                    day_chat = self.window_manager.windows.get("day_chat") if hasattr(self.window_manager, "windows") else None
+                    if day_chat and hasattr(day_chat, "handle_chat_broadcast"):
+                        day_chat.handle_chat_broadcast(payload)
+            except Exception as e:
+                print(f"[WARNING] Failed to dispatch CHAT_BROADCAST: {e}")
             return
 
         username = self.window_manager.get_shared_data("username")
@@ -604,16 +623,7 @@ class RoomWindow(QtWidgets.QWidget):
             # Bắt đầu night phase ngay (sẽ show seer select hoặc seer wait)
             self.start_night_phase(duration, seer_duration, guard_duration, wolf_duration)
 
-        elif header == 501:  # PING
-            # Server gửi PING để kiểm tra connection, client trả về PONG
-            try:
-                import json
-                self.network_client.send_packet(502, {"type": "pong"})  # 502 = PONG
-            except Exception as e:
-                print(f"[ERROR] Failed to send PONG: {e}")
-        elif header == 502:  # PONG
-            # Server trả về PONG sau khi client gửi PING (không cần xử lý gì)
-            pass
+        # NOTE: PING/PONG handled at the top of this function to avoid duplicate branches.
         elif header == 406:  # SEER_RESULT
             # Only the seer will receive this normally
             status = payload.get("status")
@@ -630,6 +640,15 @@ class RoomWindow(QtWidgets.QWidget):
             else:
                 msg = payload.get("message", "Seer check failed")
                 self.toast_manager.warning(msg)
+
+        elif header == 404:  # WOLF_KILL_RES (vote received confirmation)
+            if isinstance(payload, dict) and payload.get("type") == "wolf_vote_received":
+                try:
+                    self.toast_manager.success("✅ Wolf vote submitted!")
+                except Exception:
+                    pass
+            else:
+                print(f"[DEBUG] Received WOLF_KILL_RES (404): {payload}")
         
         elif header == 311:  # PHASE_GUARD_START
             # Server báo tất cả client chuyển sang guard phase
@@ -683,7 +702,7 @@ class RoomWindow(QtWidgets.QWidget):
                 
                 # Update wolf duration if needed
                 night_ctrl.wolf_duration = wolf_duration
-                # Chuyển sang wolf phase - wolf sẽ thấy WolfPhaseController, còn lại thấy wait window
+                # Chuyển sang wolf phase - wolf sẽ thấy WolfSelectWindow/WolfChatWindow, còn lại thấy wait window
                 night_ctrl.start_wolf_phase()
             else:
                 print("[ERROR] Night phase controller not found when receiving PHASE_WOLF_START")
@@ -693,9 +712,18 @@ class RoomWindow(QtWidgets.QWidget):
             # Server báo bắt đầu day phase sau khi night phase kết thúc
             print("[DEBUG] Received PHASE_DAY from server, starting day phase")
             
-            # Lấy danh sách người chết từ payload
-            dead_players = payload.get("dead_players", [])
-            print(f"[DEBUG] Dead players: {dead_players}")
+            # Payload compact (mới): { result: "killed"|"no_kill", targetId? }
+            # Payload legacy (cũ): { dead_players: [...] }
+            dead_players = []
+            if isinstance(payload, dict) and "result" in payload:
+                result = payload.get("result")
+                target = payload.get("targetId") or payload.get("target_username")
+                if result == "killed" and target:
+                    dead_players = [target]
+                print(f"[DEBUG] PHASE_DAY compact result: {result}, target={target}")
+            else:
+                dead_players = payload.get("dead_players", [])
+                print(f"[DEBUG] Dead players (legacy): {dead_players}")
             
             # Đóng tất cả các window của night phase
             night_ctrl = self.window_manager.get_shared_data("night_phase_controller")

@@ -194,13 +194,15 @@ class WerewolfNetworkClient:
             raise RuntimeError("Client not created")
 
         header = ctypes.c_ushort()
-        payload_buffer = ctypes.create_string_buffer(8192)
+        # Keep this comfortably above any expected server payload to avoid "Payload too large"
+        # from the C layer (ww_client_receive checks length >= max_size).
+        payload_buffer = ctypes.create_string_buffer(65536)
 
         result = self.lib.ww_client_receive(
             self.client,
             ctypes.byref(header),
             payload_buffer,
-            8192
+            65536
         )
 
         if result < 0:

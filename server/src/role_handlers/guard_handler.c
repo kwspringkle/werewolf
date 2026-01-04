@@ -9,7 +9,7 @@
 #include "types.h"     // for MAX_ROOMS, Player, Room, ROLE_GUARD
 #include "room_manager.h" // for rooms array
 
-#define WOLF_PHASE_DURATION 30
+#define WOLF_PHASE_DURATION 60
 
 
 void guard_get_info(int room_index, int player_index, cJSON *info_obj) {

@@ -24,6 +24,10 @@ class WerewolfApplication:
     def __init__(self):
         self.app = QtWidgets.QApplication(sys.argv)
         self.app.setApplicationName("Werewolf Game")
+        # Prevent the whole client from exiting when transient night-phase dialogs close.
+        # Otherwise, if all main windows are hidden and the last dialog closes, Qt will quit,
+        # triggering cleanup() and disconnecting the socket (looks like "random disconnects").
+        self.app.setQuitOnLastWindowClosed(False)
         
         # Load stylesheet
         self.load_stylesheet()
