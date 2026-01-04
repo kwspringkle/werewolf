@@ -1,13 +1,14 @@
 from PyQt5 import QtWidgets, QtCore
+from components.user_header import UserHeader
 
 class WolfChatWindow(QtWidgets.QWidget):
     """Styled wolf chat (card-like, timer)"""
-    def __init__(self, my_username, wolf_usernames, send_callback=None, duration_seconds=30, network_client=None, room_id=None, parent=None):
+    def __init__(self, my_username, wolf_usernames, send_callback=None, duration_seconds=30, network_client=None, room_id=None, parent=None, window_manager=None, toast_manager=None):
         super().__init__(parent)
+        self.use_default_size = True
+        self.preserve_window_flags = False
         self.setObjectName("wolf_chat_window")
         self.setWindowTitle("Wolf Chat")
-        self.setFixedSize(500, 600)
-        self.setWindowFlags(QtCore.Qt.Dialog | QtCore.Qt.FramelessWindowHint)
         self.send_callback = send_callback
         self.my_username = my_username
         self.wolf_usernames = wolf_usernames
@@ -15,14 +16,23 @@ class WolfChatWindow(QtWidgets.QWidget):
         self.remaining = duration_seconds
         self.network_client = network_client
         self.room_id = room_id
+        self.window_manager = window_manager
+        self.toast_manager = toast_manager
+        self.can_send_chat = True
         self.setup_ui()
         self.start_timer()
-        self.start_receive_timer()
+        # IMPORTANT: Do NOT read from network socket here.
+        # RoomWindow is the single consumer of packets and will dispatch CHAT_BROADCAST to this window.
 
     def setup_ui(self):
         main_layout = QtWidgets.QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
+
+        self.user_header = UserHeader(self)
+        self.user_header.set_username(self.my_username or "Player")
+        self.user_header.logout_clicked.connect(self.on_logout)
+        main_layout.addWidget(self.user_header)
 
         card = QtWidgets.QFrame()
         card.setObjectName("wolf_chat_card")
@@ -59,8 +69,8 @@ class WolfChatWindow(QtWidgets.QWidget):
         self.switch_btn.setMinimumHeight(28)
         self.switch_btn.setStyleSheet("""
             QPushButton {
-                background-color: #555555;
-                color: #888888;
+                background-color: #e94560;
+                color: white;
                 border: none;
                 border-radius: 5px;
                 font-weight: bold;
@@ -68,11 +78,10 @@ class WolfChatWindow(QtWidgets.QWidget):
                 padding: 6px 12px;
             }
             QPushButton:hover {
-                background-color: #666666;
-                color: #999999;
+                background-color: #ff5770;
             }
             QPushButton:pressed {
-                background-color: #444444;
+                background-color: #d03550;
             }
         """)
         header_h.addWidget(self.switch_btn)
@@ -101,6 +110,15 @@ class WolfChatWindow(QtWidgets.QWidget):
         self.messages_layout.addStretch()
         self.messages_area.setWidget(self.messages_container)
         card_layout.addWidget(self.messages_area, 1)
+
+        # Hint for dead users
+        self.chat_hint_label = QtWidgets.QLabel("Bạn đã chết, bạn không thể gửi tin nhắn.")
+        self.chat_hint_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.chat_hint_label.setVisible(False)
+        self.chat_hint_label.setStyleSheet(
+            "font-size:12px; color:#f39c12; background-color: rgba(243,156,18,0.12); padding:6px; border-radius:6px;"
+        )
+        card_layout.addWidget(self.chat_hint_label)
 
         # Input row (styled like lobby)
         input_layout = QtWidgets.QHBoxLayout()
@@ -134,11 +152,76 @@ class WolfChatWindow(QtWidgets.QWidget):
         self.send_btn.setEnabled(False)
         self.send_btn.clicked.connect(self.send_message)
         input_layout.addWidget(self.send_btn)
-        self.input_box.textChanged.connect(lambda t: self.send_btn.setEnabled(bool(t.strip())))
+        self.input_box.textChanged.connect(lambda t: self.send_btn.setEnabled(bool(t.strip()) and self.can_send_chat))
 
         card_layout.addLayout(input_layout)
 
         main_layout.addWidget(card)
+
+        # Apply chat permissions after UI is built
+        self.refresh_chat_permissions()
+
+    def _is_me_alive(self) -> bool:
+        if not self.window_manager or not self.my_username:
+            return True
+        players = self.window_manager.get_shared_data("room_players", [])
+        if not isinstance(players, list):
+            return True
+        for p in players:
+            if isinstance(p, dict) and p.get("username") == self.my_username:
+                raw = p.get("is_alive", 1)
+                try:
+                    return int(raw) != 0
+                except Exception:
+                    return bool(raw)
+        return True
+
+    def refresh_chat_permissions(self):
+        alive = self._is_me_alive()
+        self.can_send_chat = bool(alive)
+        if hasattr(self, "chat_hint_label"):
+            self.chat_hint_label.setVisible(not self.can_send_chat)
+        if hasattr(self, "input_box"):
+            self.input_box.setEnabled(self.can_send_chat)
+        if hasattr(self, "send_btn"):
+            if not self.can_send_chat:
+                self.send_btn.setEnabled(False)
+            else:
+                self.send_btn.setEnabled(bool(self.input_box.text().strip()))
+
+    def on_logout(self):
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Logout",
+            "Are you sure you want to logout?",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No,
+        )
+        if reply != QtWidgets.QMessageBox.Yes:
+            return
+
+        try:
+            nc = self.network_client
+            if nc:
+                try:
+                    nc.send_packet(208, {})
+                except Exception:
+                    pass
+                try:
+                    nc.send_packet(105, {})
+                except Exception:
+                    pass
+            if self.window_manager:
+                self.window_manager.set_shared_data("user_id", None)
+                self.window_manager.set_shared_data("username", None)
+                self.window_manager.set_shared_data("current_room_id", None)
+                self.window_manager.set_shared_data("current_room_name", None)
+                self.window_manager.set_shared_data("is_host", False)
+                self.window_manager.set_shared_data("connected", False)
+                self.window_manager.navigate_to("welcome")
+        except Exception as e:
+            if self.toast_manager:
+                self.toast_manager.error(f"Logout error: {str(e)}")
 
     def start_timer(self):
         self.timer = QtCore.QTimer(self)
@@ -153,7 +236,33 @@ class WolfChatWindow(QtWidgets.QWidget):
             self.timer.stop()
             self.close()
 
+    def sync_remaining(self, seconds: int):
+        """Sync countdown with the wolf phase remaining time."""
+        try:
+            self.remaining = max(0, int(seconds))
+            if hasattr(self, "timer_label"):
+                self.timer_label.setText(f"⏱️ {self.remaining}s")
+        except Exception:
+            pass
+
+    def handle_chat_broadcast(self, payload: dict):
+        """Called by RoomWindow when receiving CHAT_BROADCAST (402)."""
+        if not isinstance(payload, dict):
+            return
+        chat_type = payload.get("chat_type", "day")
+        if chat_type != "wolf":
+            return
+        username = payload.get("username", "Unknown")
+        message = payload.get("message", "")
+        if username in self.wolf_usernames or username == self.my_username:
+            self.append_message(username, message)
+            print(f"[DEBUG] Wolf chat received: {username}: {message}")
+
     def send_message(self):
+        if not self.can_send_chat:
+            if self.toast_manager:
+                self.toast_manager.warning("Bạn đã chết, không thể gửi tin nhắn")
+            return
         msg = self.input_box.text().strip()
         if msg:
             try:
@@ -217,59 +326,7 @@ class WolfChatWindow(QtWidgets.QWidget):
         # Auto-scroll to bottom
         QtCore.QTimer.singleShot(50, lambda: self.messages_area.verticalScrollBar().setValue(self.messages_area.verticalScrollBar().maximum()))
 
-    def start_receive_timer(self):
-        """Start timer to receive chat messages from server"""
-        if self.network_client:
-            self.recv_timer = QtCore.QTimer(self)
-            self.recv_timer.timeout.connect(self.receive_packets)
-            self.recv_timer.start(100)  # Check every 100ms
-
-    def receive_packets(self):
-        """Receive and handle packets from server"""
-        if not self.network_client:
-            return
-
-        # Process ALL available packets in buffer (not just one)
-        max_packets_per_tick = 10  # Prevent infinite loop
-        packets_processed = 0
-
-        while packets_processed < max_packets_per_tick:
-            try:
-                header, payload = self.network_client.receive_packet()
-                if header is None:
-                    break  # No more packets available
-
-                packets_processed += 1
-
-                # Handle CHAT_BROADCAST
-                if header == 402:  # CHAT_BROADCAST
-                    chat_type = payload.get("chat_type", "day")
-                    # Only show wolf chat messages, ignore day chat
-                    if chat_type == "wolf":
-                        username = payload.get("username", "Unknown")
-                        message = payload.get("message", "")
-                        # Only show wolf messages (from wolves in this room)
-                        if username in self.wolf_usernames or username == self.my_username:
-                            self.append_message(username, message)
-                            print(f"[DEBUG] Wolf chat received: {username}: {message}")
-
-                # Handle PING
-                elif header == 501:
-                    try:
-                        self.network_client.send_packet(502, {"type": "pong"})
-                    except:
-                        pass
-
-            except RuntimeError as e:
-                # Ignore errors during chat (server might disconnect during phase transition)
-                break
-            except Exception as e:
-                print(f"[ERROR] Wolf chat receive error: {e}")
-                break
-
     def closeEvent(self, event):
         if hasattr(self, 'timer'):
             self.timer.stop()
-        if hasattr(self, 'recv_timer'):
-            self.recv_timer.stop()
         event.accept()

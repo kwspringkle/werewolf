@@ -16,7 +16,6 @@ from windows.roles.guard.guard_wait_window import GuardWaitWindow
 # Wolf
 from windows.roles.wolf.wolf_select_window import WolfSelectWindow
 from windows.roles.wolf.wolf_chat_window import WolfChatWindow
-from windows.roles.wolf.wolf_phase_controller import WolfPhaseController
 
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
@@ -77,8 +76,7 @@ if __name__ == "__main__":
     # wolf_chat = WolfChatWindow("Alice", ["Alice", "David"])
     # wolf_chat.show()
 
-    # 9. WolfPhaseController (vote + chat switch)
-    # wolf_phase = WolfPhaseController([p["username"] for p in players], [1,1,1,1], "Alice", ["Alice", "David"])
+    # 9. (Removed) WolfPhaseController - night_phase_controller now manages wolf vote/chat directly
     # wolf_phase.show()
 
     sys.exit(app.exec_())

@@ -1,20 +1,24 @@
 from PyQt5 import QtWidgets, QtCore
+from components.user_header import UserHeader
 
 class SeerSelectWindow(QtWidgets.QWidget):
-    """Seer selection screen styled like RoleCardWindow, with countdown"""
-    def __init__(self, players, my_username, duration_seconds=30, network_client=None, room_id=None, parent=None):
+    """màn chọn cho role tiên tri"""
+    def __init__(self, players, my_username, duration_seconds=30, network_client=None, room_id=None, parent=None, window_manager=None, toast_manager=None):
         super().__init__(parent)
+        # Normal window (movable, consistent sizing via WindowManager)
+        self.use_default_size = True
+        self.preserve_window_flags = False
         self.players = players
         self.my_username = my_username
         self.duration = duration_seconds
         self.remaining = duration_seconds
         self.network_client = network_client
         self.room_id = room_id
+        self.window_manager = window_manager
+        self.toast_manager = toast_manager
         self.selected_username = None
         self.setObjectName("seer_select_window")
         self.setWindowTitle("Seer — Pick a player")
-        self.setFixedSize(500, 600)
-        self.setWindowFlags(QtCore.Qt.Dialog | QtCore.Qt.FramelessWindowHint)
         self.setup_ui()
         self.start_timer()
 
@@ -22,6 +26,12 @@ class SeerSelectWindow(QtWidgets.QWidget):
         main_layout = QtWidgets.QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
+
+        # User header
+        self.user_header = UserHeader(self)
+        self.user_header.set_username(self.my_username or "Player")
+        self.user_header.logout_clicked.connect(self.on_logout)
+        main_layout.addWidget(self.user_header)
 
         card = QtWidgets.QFrame()
         card.setObjectName("seer_card")
@@ -61,6 +71,11 @@ class SeerSelectWindow(QtWidgets.QWidget):
         title_label.setStyleSheet("font-size: 22px; color: #f39c12; font-weight: bold;")
         self.card_layout.addWidget(title_label)
 
+        hint_label = QtWidgets.QLabel("Hint: You already know your own role.")
+        hint_label.setAlignment(QtCore.Qt.AlignCenter)
+        hint_label.setStyleSheet("font-size: 12px; color: #cccccc; margin-top: 2px;")
+        self.card_layout.addWidget(hint_label)
+
 
         # Grid chọn user dạng card nhỏ vuông như lobby
         self.user_grid_widget = QtWidgets.QWidget()
@@ -75,7 +90,13 @@ class SeerSelectWindow(QtWidgets.QWidget):
         print(f"[DEBUG] SeerSelectWindow rendering {len(self.players)} players")
         for p in self.players:
             uname = p.get("username") if isinstance(p, dict) else str(p)
-            is_alive = p.get("is_alive", 1) if isinstance(p, dict) else 1
+            raw_alive = p.get("is_alive", 1) if isinstance(p, dict) else 1
+            try:
+                is_alive = int(raw_alive) != 0
+            except Exception:
+                is_alive = bool(raw_alive)
+
+            is_self = (uname == self.my_username)
 
             card_item = QtWidgets.QFrame()
             card_item.setObjectName("user_card")
@@ -122,8 +143,14 @@ class SeerSelectWindow(QtWidgets.QWidget):
             name_label.setWordWrap(True)
             card_item_layout.addWidget(name_label)
 
-            # Chỉ make clickable nếu player còn sống
-            if is_alive:
+            # Disable self (seer already knows own role)
+            if is_self:
+                card_item.setCursor(QtCore.Qt.ForbiddenCursor)
+                card_item.setEnabled(False)
+                name_label.setText(uname + "\n(You — already know)")
+
+            # Chỉ make clickable nếu player còn sống và không phải self
+            if is_alive and (not is_self):
                 card_item.mousePressEvent = self._make_card_click(card_item, uname)
                 card_item.setCursor(QtCore.Qt.PointingHandCursor)
             else:
@@ -266,15 +293,63 @@ class SeerSelectWindow(QtWidgets.QWidget):
         
         if self.network_client and self.room_id is not None:
             try:
-                # Gửi SEER_CHECK_REQ (405) đến server
                 print(f"[DEBUG] Sending SEER_CHECK_REQ for target: {target}")
-                self.network_client.send_packet(405, {
-                    "room_id": self.room_id,
-                    "target_username": target
-                })
+                # Prefer wrapper method if available
+                if hasattr(self.network_client, "send_seer_check"):
+                    self.network_client.send_seer_check(self.room_id, target)
+                else:
+                    self.network_client.send_packet(405, {
+                        "room_id": self.room_id,
+                        "target_username": target
+                    })
             except Exception as e:
                 print(f"[ERROR] Error sending seer request: {e}")
                 QtWidgets.QMessageBox.warning(self, "Network", "Failed to send seer request")
+                # Re-enable on failure
+                self.select_btn.setEnabled(True)
+                self.skip_btn.setEnabled(True)
+                if hasattr(self, 'timer'):
+                    self.timer.start(1000)
+                return
+
+        # Close window - wait for SEER_RESULT broadcast
+        self.close()
+
+    def on_logout(self):
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Logout",
+            "Are you sure you want to logout?",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No,
+        )
+        if reply != QtWidgets.QMessageBox.Yes:
+            return
+
+        try:
+            # Best-effort: tell server
+            nc = self.network_client
+            if nc:
+                try:
+                    nc.send_packet(208, {})
+                except Exception:
+                    pass
+                try:
+                    nc.send_packet(105, {})
+                except Exception:
+                    pass
+
+            if self.window_manager:
+                self.window_manager.set_shared_data("user_id", None)
+                self.window_manager.set_shared_data("username", None)
+                self.window_manager.set_shared_data("current_room_id", None)
+                self.window_manager.set_shared_data("current_room_name", None)
+                self.window_manager.set_shared_data("is_host", False)
+                self.window_manager.set_shared_data("connected", False)
+                self.window_manager.navigate_to("welcome")
+        except Exception as e:
+            if self.toast_manager:
+                self.toast_manager.error(f"Logout error: {str(e)}")
                 # Re-enable buttons on error
                 self.select_btn.setEnabled(True)
                 self.skip_btn.setEnabled(True)

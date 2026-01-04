@@ -24,6 +24,61 @@ class WindowManager(QtCore.QObject):
     def register_window(self, name, window_instance):
         """Đăng ký một cửa sổ"""
         self.windows[name] = window_instance
+
+    def hide_all_except(self, except_names=None):
+        """Ẩn tất cả các cửa sổ đã đăng ký ngoại trừ những cửa sổ được chỉ định.
+
+        Tính năng này hữu ích khi kết nối lại/tiếp tục phiên làm việc: 
+        một số cửa sổ gameplay có thể đã được mở thông qua open_window() và nếu không thì chúng sẽ vẫn hiển thị.
+        """
+        except_set = set(except_names or [])
+        for name, window in self.windows.items():
+            if name in except_set:
+                continue
+            try:
+                window.hide()
+            except Exception:
+                pass
+
+    def open_window(self, window_name, data=None, offset=(30, 30)):
+        """Mở thêm một cửa sổ mà KHÔNG ẩn cửa sổ hiện tại.
+
+        Dùng cho các flow cần nhiều windows đồng thời (ví dụ: wolf vote + wolf chat).
+        """
+        if window_name not in self.windows:
+            raise ValueError(f"Window '{window_name}' not registered")
+
+        new_window = self.windows[window_name]
+
+        if data and hasattr(new_window, 'set_data'):
+            new_window.set_data(data)
+
+        use_default_size = getattr(new_window, "use_default_size", True)
+        if use_default_size:
+            new_window.resize(WindowManager.DEFAULT_WIDTH, WindowManager.DEFAULT_HEIGHT)
+
+        # Position: slightly offset from current window (or center if unknown)
+        if self.current_window and self.current_window in self.windows:
+            current = self.windows[self.current_window]
+            try:
+                dx, dy = offset
+            except Exception:
+                dx, dy = (30, 30)
+            new_window.move(current.x() + dx, current.y() + dy)
+        elif not self.window_position_set:
+            screen = QtWidgets.QApplication.desktop().screenGeometry()
+            x = (screen.width() - WindowManager.DEFAULT_WIDTH) // 2
+            y = (screen.height() - WindowManager.DEFAULT_HEIGHT) // 2
+            new_window.move(x, y)
+            self.window_position_set = True
+
+        preserve_window_flags = getattr(new_window, "preserve_window_flags", False)
+        if not preserve_window_flags:
+            new_window.setWindowFlags(QtCore.Qt.Window)
+
+        new_window.show()
+        new_window.raise_()
+        new_window.activateWindow()
     
     def navigate_to(self, window_name, data=None):
         """Điều hướng đến một cửa sổ cụ thể (giữ nguyên vị trí, không cascade)"""
@@ -46,8 +101,10 @@ class WindowManager(QtCore.QObject):
         if data and hasattr(new_window, 'set_data'):
             new_window.set_data(data)
         
-        # Set kích thước nhất quán
-        new_window.resize(WindowManager.DEFAULT_WIDTH, WindowManager.DEFAULT_HEIGHT)
+        # Set kích thước nhất quán (trừ khi window muốn tự control size, ví dụ in-game overlay screens)
+        use_default_size = getattr(new_window, "use_default_size", True)
+        if use_default_size:
+            new_window.resize(WindowManager.DEFAULT_WIDTH, WindowManager.DEFAULT_HEIGHT)
         
         # Set vị trí: giữ nguyên vị trí nếu có, nếu không thì center màn hình lần đầu
         if saved_x is not None and saved_y is not None:
@@ -61,8 +118,10 @@ class WindowManager(QtCore.QObject):
             new_window.move(x, y)
             self.window_position_set = True
         
-        # Đảm bảo window flags cho phép nhận input
-        new_window.setWindowFlags(QtCore.Qt.Window)
+        # Đảm bảo window flags cho phép nhận input (trừ khi window muốn tự control flags)
+        preserve_window_flags = getattr(new_window, "preserve_window_flags", False)
+        if not preserve_window_flags:
+            new_window.setWindowFlags(QtCore.Qt.Window)
         
         # Hiển thị và focus window
         new_window.show()

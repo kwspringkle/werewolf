@@ -1,8 +1,3 @@
-/*
- * Werewolf Game Theme - Dark Gothic Style
- * Màu chủ đạo: Tối, đỏ máu, vàng trăng
- */
-
 /* ========== GLOBAL STYLES ========== */
 * {
     font-family: 'Segoe UI', 'Segoe UI Emoji', 'Arial', sans-serif;

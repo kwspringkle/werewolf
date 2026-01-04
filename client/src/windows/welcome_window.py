@@ -15,9 +15,46 @@ class WelcomeWindow(QtWidgets.QWidget):
         self.network_client = network_client
         self.toast_manager = toast_manager
         self.window_manager = window_manager
+        self.is_connected = False
         
         self.setObjectName("welcome_window")
         self.setup_ui()
+    
+    def showEvent(self, event):
+        """Called when window is shown - reset state after logout"""
+        super().showEvent(event)
+        # Kiểm tra xem có đang connected không từ shared_data
+        connected = self.window_manager.get_shared_data("connected", False)
+        
+        # Nếu không connected hoặc vừa logout, reset UI
+        if not connected or not self.is_connected:
+            self.reset_connection_ui()
+        
+    def reset_connection_ui(self):
+        """Reset UI về trạng thái chưa kết nối"""
+        self.connect_button.setEnabled(True)
+        self.host_input.setEnabled(True)
+        self.port_input.setEnabled(True)
+        
+        # Disable navigation buttons
+        self.register_button.setEnabled(False)
+        self.register_button.setStyleSheet("""
+            QPushButton:disabled {
+                background-color: #555555;
+                color: #888888;
+                border: 1px solid #444444;
+            }
+        """)
+        self.login_button.setEnabled(False)
+        self.login_button.setStyleSheet("""
+            QPushButton:disabled {
+                background-color: #555555;
+                color: #888888;
+                border: 1px solid #444444;
+            }
+        """)
+        self.is_connected = False
+        self.window_manager.set_shared_data("connected", False)
         
     def setup_ui(self):
         """Thiết lập giao diện người dùng"""
@@ -148,10 +185,14 @@ class WelcomeWindow(QtWidgets.QWidget):
             
             # Store connection info
             self.window_manager.set_shared_data("network_client", self.network_client)
+            self.window_manager.set_shared_data("server_host", host)
+            self.window_manager.set_shared_data("server_port", port)
             self.window_manager.set_shared_data("connected", True)
+            self.is_connected = True
             
         except Exception as e:
             self.toast_manager.error(f"Connection failed: {str(e)}")
+            self.is_connected = False
             
     def on_register(self):
         """Điều hướng đến màn hình đăng ký"""

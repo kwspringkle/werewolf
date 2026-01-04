@@ -1,22 +1,33 @@
+#include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include <stdlib.h>
 #include "protocol.h"
 #include "packet_handler.h"
+#include "cJSON.h"
+#include "role_handlers/werewolf_handler.h"
+#include "types.h"
+#include "room_manager.h"
 
-// Helper: Đếm số vote cho từng username
-static void count_wolf_votes(Room *room, int *vote_counts, int *max_votes, int *victim_index) {
-    int n = room->current_players;
-    memset(vote_counts, 0, sizeof(int) * n);
-    *max_votes = 0;
-    *victim_index = -1;
-    for (int i = 0; i < n; i++) {
-        if (room->players[i].role != ROLE_WEREWOLF || !room->players[i].is_alive) continue;
-        // Lưu lựa chọn vào player struct nếu muốn, hoặc dùng mảng tạm
-        // Ở đây giả sử room->players[i].username chứa tên mục tiêu
-        // (Bạn có thể mở rộng struct Player nếu muốn lưu vote)
+extern Room rooms[MAX_ROOMS];
+
+void werewolf_get_info(int room_index, int player_index, cJSON *info_obj) {
+    cJSON_AddStringToObject(info_obj, "role_name", "Werewolf");
+    cJSON_AddStringToObject(info_obj, "role_icon", "🐺");
+    cJSON_AddStringToObject(info_obj, "role_description",
+        "You are a WEREWOLF! You know other werewolves. At night, discuss with your team to kill one villager. Your goal: Eliminate all villagers.");
+
+    // Add werewolf team info
+    cJSON *werewolf_team = cJSON_CreateArray();
+
+    for (int i = 0; i < rooms[room_index].current_players; i++) {
+        if (i != player_index && rooms[room_index].players[i].role == ROLE_WEREWOLF) {
+            cJSON_AddItemToArray(werewolf_team,
+                cJSON_CreateString(rooms[room_index].players[i].username));
+        }
     }
-    // Đếm vote (giả sử có mảng votes[] chứa index mục tiêu của từng sói)
-    // Ở đây chỉ là khung, bạn cần lưu lại vote của từng sói khi nhận gói tin
+
+    cJSON_AddItemToObject(info_obj, "werewolf_team", werewolf_team);
 }
 
 // Xử lý gói tin sói cắn
@@ -24,9 +35,22 @@ void werewolf_handle_packet(int client_fd, cJSON *json) {
     cJSON *room_id_obj = cJSON_GetObjectItemCaseSensitive(json, "room_id");
     cJSON *target_obj = cJSON_GetObjectItemCaseSensitive(json, "target_username");
 
+    cJSON *response = cJSON_CreateObject();
+
+    // Helper macro: send fail response and return
+#define WOLF_FAIL(MSG) do { \
+    cJSON_AddStringToObject(response, "status", "fail"); \
+    cJSON_AddStringToObject(response, "message", (MSG)); \
+    char *res_str = cJSON_PrintUnformatted(response); \
+    send_packet(client_fd, WOLF_KILL_RES, res_str); \
+    free(res_str); \
+    cJSON_Delete(response); \
+    return; \
+} while(0)
+
     if (!room_id_obj || !cJSON_IsNumber(room_id_obj) || !target_obj || !cJSON_IsString(target_obj)) {
         printf("[SERVER] Wolf kill request missing room_id or target_username\n");
-        return;
+        WOLF_FAIL("Invalid request");
     }
 
     int room_id = room_id_obj->valueint;
@@ -40,7 +64,7 @@ void werewolf_handle_packet(int client_fd, cJSON *json) {
 
     if (room_index == -1) {
         printf("[SERVER] Wolf kill request: room %d not found\n", room_id);
-        return;
+        WOLF_FAIL("Room not found");
     }
 
     // Tìm người đang gửi request
@@ -54,24 +78,24 @@ void werewolf_handle_packet(int client_fd, cJSON *json) {
 
     if (requester_index == -1) {
         printf("[SERVER] Wolf kill request: sender not in room %d\n", room_id);
-        return;
+        WOLF_FAIL("You are not in this room");
     }
 
     Player *requester = &rooms[room_index].players[requester_index];
     if (!requester->is_alive || requester->role != ROLE_WEREWOLF) {
         printf("[SERVER] Wolf kill request from non-wolf or dead player: %s\n", requester->username);
-        return;
+        WOLF_FAIL("You cannot vote (dead or not a werewolf)");
     }
 
     if (!rooms[room_index].night_phase_active) {
         printf("[SERVER] Wolf kill request when night phase not active\n");
-        return;
+        WOLF_FAIL("Night phase is not active");
     }
 
     time_t now = time(NULL);
     if (rooms[room_index].wolf_deadline != 0 && now > rooms[room_index].wolf_deadline) {
         printf("[SERVER] Wolf kill request after deadline\n");
-        return;
+        WOLF_FAIL("Wolf phase deadline passed");
     }
 
     // Kiểm tra target còn sống không
@@ -83,12 +107,16 @@ void werewolf_handle_packet(int client_fd, cJSON *json) {
     }
     if (target_index == -1) {
         printf("[SERVER] Wolf kill request: target %s not found\n", target_obj->valuestring);
-        return;
+        WOLF_FAIL("Target not found");
     }
     if (!rooms[room_index].players[target_index].is_alive) {
         printf("[SERVER] Wolf kill request: target %s already dead\n", target_obj->valuestring);
-        return;
+        WOLF_FAIL("Target is already dead");
     }
+
+    // Clear fail response object before sending success confirmation later
+    cJSON_Delete(response);
+#undef WOLF_FAIL
 
     // Lưu lại vote của sói
     int n = rooms[room_index].current_players;
@@ -113,7 +141,13 @@ void werewolf_handle_packet(int client_fd, cJSON *json) {
     }
     rooms[room_index].wolf_vote_count = wolf_vote_count;
 
-    // NO RESPONSE SENT - client doesn't handle WOLF_KILL_RES
+    // Gửi compact confirmation khi vote (chỉ gửi cho wolf vừa submit)
+    cJSON *vote_conf = cJSON_CreateObject();
+    cJSON_AddStringToObject(vote_conf, "type", "wolf_vote_received");
+    char *vote_conf_str = cJSON_PrintUnformatted(vote_conf);
+    send_packet(client_fd, WOLF_KILL_RES, vote_conf_str);
+    free(vote_conf_str);
+    cJSON_Delete(vote_conf);
 
     // Nếu tất cả sói còn sống đã vote, tổng hợp kết quả
     if (wolf_vote_count == alive_wolves && !rooms[room_index].wolf_kill_done) {
@@ -129,82 +163,84 @@ void werewolf_handle_packet(int client_fd, cJSON *json) {
             }
         }
         // Tìm người bị vote nhiều nhất
-        int max_votes = 0, victim_index = -1;
+        int max_votes = 0;
+        int victim_candidates[MAX_PLAYERS_PER_ROOM];
+        int candidate_count = 0;
+        
         for (int i = 0; i < n; i++) {
             if (vote_tally[i] > max_votes) {
                 max_votes = vote_tally[i];
-                victim_index = i;
+                candidate_count = 0;
+                victim_candidates[candidate_count++] = i;
+            } else if (vote_tally[i] == max_votes && max_votes > 0) {
+                victim_candidates[candidate_count++] = i;
             }
         }
-        // Kiểm tra hợp lệ
-        if (victim_index != -1 && max_votes > 0) {
+        
+        // Xử lý kết quả vote
+        int victim_index = -1;
+        const char *result = "no_kill";
+        const char *target_id = NULL;
+        
+        if (candidate_count > 0 && max_votes > 0) {
+            // Nếu hòa (nhiều người cùng số vote cao nhất), random chọn 1
+            if (candidate_count > 1) {
+                srand((unsigned int)time(NULL) + room_index); // Seed với time + room để đảm bảo random
+                victim_index = victim_candidates[rand() % candidate_count];
+                printf("[SERVER] Tie detected (%d candidates), randomly selected: %s\n", 
+                       candidate_count, rooms[room_index].players[victim_index].username);
+            } else {
+                victim_index = victim_candidates[0];
+            }
+            
             Player *victim = &rooms[room_index].players[victim_index];
+            target_id = victim->username;
+            
             // Kiểm tra đã chết chưa
             if (victim->is_alive) {
                 // Kiểm tra có được bảo vệ không
                 if (strlen(rooms[room_index].guard_protected_username) > 0 &&
                     strcmp(victim->username, rooms[room_index].guard_protected_username) == 0) {
                     // Được bảo vệ, không chết
+                    result = "no_kill";
                     printf("[SERVER] %s was protected by guard, survived the attack\n", victim->username);
                 } else {
                     // Không được bảo vệ, set chết
+                    result = "killed";
                     victim->is_alive = 0;
                     printf("[SERVER] %s was killed by wolves (votes: %d)\n", victim->username, max_votes);
                 }
+            } else {
+                result = "no_kill";
+                printf("[SERVER] Target %s already dead, no kill\n", victim->username);
             }
         } else {
             printf("[SERVER] No valid victim from wolf votes (max_votes: %d)\n", max_votes);
         }
+        
         rooms[room_index].wolf_kill_done = 1;
         
-        // Kết thúc night phase và chuyển sang day phase
+        // Kết thúc night phase
         rooms[room_index].night_phase_active = 0;
         
-        // Collect danh sách người chết (bao gồm cả disconnected users)
-        cJSON *dead_players = cJSON_CreateArray();
-        for (int j = 0; j < rooms[room_index].current_players; j++) {
-            if (!rooms[room_index].players[j].is_alive) {
-                cJSON_AddItemToArray(dead_players, cJSON_CreateString(rooms[room_index].players[j].username));
-                printf("[SERVER] Player %s is dead (included in death list)\n", rooms[room_index].players[j].username);
-            }
+        // Gửi compact result thay vì large dead_players array
+        cJSON *result_obj = cJSON_CreateObject();
+        cJSON_AddStringToObject(result_obj, "type", "phase_day");
+        cJSON_AddStringToObject(result_obj, "result", result);
+        if (target_id != NULL && strcmp(result, "killed") == 0) {
+            cJSON_AddStringToObject(result_obj, "targetId", target_id);
         }
-        
-        // Broadcast day phase start to all players (KHÔNG disconnect/kick ai cả)
-        cJSON *day_notif = cJSON_CreateObject();
-        cJSON_AddStringToObject(day_notif, "type", "phase_day");
-        cJSON_AddStringToObject(day_notif, "message", "All wolves voted, night phase ended, day phase begins");
-        cJSON_AddItemToObject(day_notif, "dead_players", dead_players);
-        char *day_notif_str = cJSON_PrintUnformatted(day_notif);
-        printf("[SERVER] All wolves voted in room %d, broadcasting PHASE_DAY (304) with %d dead players\n", 
-               rooms[room_index].id, cJSON_GetArraySize(dead_players));
-        broadcast_room(room_index, PHASE_DAY, day_notif_str);
-        free(day_notif_str);
-        cJSON_Delete(day_notif);
+        char *result_str = cJSON_PrintUnformatted(result_obj);
+        printf("[SERVER] All wolves voted in room %d, broadcasting compact PHASE_DAY (304): result=%s%s%s\n", 
+               rooms[room_index].id, result, 
+               (target_id && strcmp(result, "killed") == 0) ? ", target=" : "",
+               (target_id && strcmp(result, "killed") == 0) ? target_id : "");
+        broadcast_room(room_index, PHASE_DAY, result_str);
+        free(result_str);
+        cJSON_Delete(result_obj);
     }
 }
-#include <stdio.h>
-#include "role_handlers/werewolf_handler.h"
-#include "types.h"
-#include "cJSON.h"
-#include "room_manager.h"
 
-extern Room rooms[MAX_ROOMS];
 
-void werewolf_get_info(int room_index, int player_index, cJSON *info_obj) {
-    cJSON_AddStringToObject(info_obj, "role_name", "Werewolf");
-    cJSON_AddStringToObject(info_obj, "role_icon", "🐺");
-    cJSON_AddStringToObject(info_obj, "role_description",
-        "You are a WEREWOLF! You know other werewolves. At night, discuss with your team to kill one villager. Your goal: Eliminate all villagers.");
 
-    // Add werewolf team info
-    cJSON *werewolf_team = cJSON_CreateArray();
 
-    for (int i = 0; i < rooms[room_index].current_players; i++) {
-        if (i != player_index && rooms[room_index].players[i].role == ROLE_WEREWOLF) {
-            cJSON_AddItemToArray(werewolf_team,
-                cJSON_CreateString(rooms[room_index].players[i].username));
-        }
-    }
-
-    cJSON_AddItemToObject(info_obj, "werewolf_team", werewolf_team);
-}

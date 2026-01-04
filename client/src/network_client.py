@@ -11,6 +11,26 @@ from pathlib import Path
 
 
 class WerewolfNetworkClient:
+    def send_role_card_done(self, room_id=None):
+        """Notify server that this client finished viewing role card.
+
+        Prefer a dedicated C wrapper if available; fallback to send_packet(310,...)
+        so older DLL/SO builds still work.
+        """
+        if not self.client:
+            raise RuntimeError("Client not created")
+
+        if hasattr(self.lib, 'ww_client_role_card_done_send'):
+            rid = int(room_id) if room_id is not None else 0
+            result = self.lib.ww_client_role_card_done_send(self.client, rid)
+            if result < 0:
+                raise RuntimeError(f"Send role card done failed: {self.get_error()}")
+            return result
+
+        payload = {}
+        if room_id is not None:
+            payload["room_id"] = int(room_id)
+        return self.send_packet(310, payload)  # ROLE_CARD_DONE_REQ
     def send_wolf_kill(self, room_id, target_username):
         """Gửi yêu cầu sói cắn (wolf kill)"""
         if not self.client:
@@ -90,6 +110,11 @@ class WerewolfNetworkClient:
         self._define_functions()
         
     def _define_functions(self):
+        # ww_client_role_card_done_send(client, room_id) -> int (optional)
+        if hasattr(self.lib, 'ww_client_role_card_done_send'):
+            self.lib.ww_client_role_card_done_send.argtypes = [ctypes.c_void_p, ctypes.c_int]
+            self.lib.ww_client_role_card_done_send.restype = ctypes.c_int
+
         # ww_client_wolf_kill_send(client, room_id, target_username) -> int
         if hasattr(self.lib, 'ww_client_wolf_kill_send'):
             self.lib.ww_client_wolf_kill_send.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_char_p]
@@ -194,13 +219,15 @@ class WerewolfNetworkClient:
             raise RuntimeError("Client not created")
 
         header = ctypes.c_ushort()
-        payload_buffer = ctypes.create_string_buffer(8192)
+        # Keep this comfortably above any expected server payload to avoid "Payload too large"
+        # from the C layer (ww_client_receive checks length >= max_size).
+        payload_buffer = ctypes.create_string_buffer(65536)
 
         result = self.lib.ww_client_receive(
             self.client,
             ctypes.byref(header),
             payload_buffer,
-            8192
+            65536
         )
 
         if result < 0:

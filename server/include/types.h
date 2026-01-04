@@ -2,6 +2,7 @@
 #define TYPES_H
 
 #include <time.h>
+#include <stdlib.h>
 #include "cJSON.h" 
 
 typedef struct Session Session;
@@ -13,6 +14,12 @@ typedef struct Room Room;
 #define MAX_PLAYERS_PER_ROOM 12
 #define MIN_PLAYERS_TO_START 6
 #define MAX_SESSIONS 30
+
+// Duration cho mỗi phase (giây)
+#define SEER_PHASE_DURATION 30
+#define GUARD_PHASE_DURATION 30
+#define WOLF_PHASE_DURATION 60
+#define TOTAL_NIGHT_PHASE_DURATION (SEER_PHASE_DURATION + GUARD_PHASE_DURATION + WOLF_PHASE_DURATION)
 
 // Session structure
 struct Session {

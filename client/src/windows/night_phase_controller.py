@@ -5,7 +5,8 @@ from .roles.seer.seer_result_window import SeerResultWindow
 from .roles.seer.seer_wait_window import SeerWaitWindow
 from .roles.guard.guard_select_window import GuardSelectWindow
 from .roles.guard.guard_wait_window import GuardWaitWindow
-from .roles.wolf.wolf_phase_controller import WolfPhaseController
+from .roles.wolf.wolf_select_window import WolfSelectWindow
+from .roles.wolf.wolf_chat_window import WolfChatWindow
 from .roles.wolf.wolf_wait_window import WolfWaitWindow
 
 
@@ -44,24 +45,17 @@ class NightPhaseController:
             print(f"[DEBUG] Seer select - players list: {[p.get('username', 'unknown') for p in self.players]}")
             print(f"[DEBUG] Seer select - total players: {len(self.players)}")
             try:
-                self.seer_window = SeerSelectWindow(self.players, self.my_username, self.seer_duration, self.network_client, self.room_id)
-                self.seer_window.setWindowModality(QtCore.Qt.ApplicationModal)
-                # Center the window on screen
-                screen = QtWidgets.QApplication.desktop().screenGeometry()
-                window_geometry = self.seer_window.frameGeometry()
-                window_geometry.moveCenter(screen.center())
-                self.seer_window.move(window_geometry.topLeft())
-                # Show window with all flags to ensure it's visible
-                self.seer_window.setWindowFlags(QtCore.Qt.Dialog | QtCore.Qt.FramelessWindowHint)
-                self.seer_window.show()
-                self.seer_window.raise_()
-                self.seer_window.activateWindow()
-                print("[DEBUG] SeerSelectWindow shown successfully")
-                # Force focus after a short delay to ensure it's on top
-                QtCore.QTimer.singleShot(100, lambda: (
-                    self.seer_window.raise_(),
-                    self.seer_window.activateWindow()
-                ))
+                self.seer_window = SeerSelectWindow(
+                    self.players,
+                    self.my_username,
+                    self.seer_duration,
+                    self.network_client,
+                    self.room_id,
+                )
+                # Register + navigate (single-window flow)
+                self.window_manager.register_window("seer_select", self.seer_window)
+                self.window_manager.navigate_to("seer_select")
+                print("[DEBUG] SeerSelectWindow navigated successfully")
                 # Connect to handle when seer makes choice or skips
                 # Note: seer_select_window will send SEER_CHECK_REQ, then wait for SEER_RESULT (406)
                 # When SEER_RESULT arrives, handle_seer_result will be called
@@ -75,23 +69,9 @@ class NightPhaseController:
             print("[DEBUG] User is not seer - creating and showing SeerWaitWindow")
             try:
                 self.seer_window = SeerWaitWindow(self.seer_duration)
-                self.seer_window.setWindowModality(QtCore.Qt.ApplicationModal)
-                # Center the window on screen
-                screen = QtWidgets.QApplication.desktop().screenGeometry()
-                window_geometry = self.seer_window.frameGeometry()
-                window_geometry.moveCenter(screen.center())
-                self.seer_window.move(window_geometry.topLeft())
-                # Show window with all flags to ensure it's visible
-                self.seer_window.setWindowFlags(QtCore.Qt.Dialog | QtCore.Qt.FramelessWindowHint)
-                self.seer_window.show()
-                self.seer_window.raise_()
-                self.seer_window.activateWindow()
-                print("[DEBUG] SeerWaitWindow shown successfully")
-                # Force focus after a short delay to ensure it's on top
-                QtCore.QTimer.singleShot(100, lambda: (
-                    self.seer_window.raise_(),
-                    self.seer_window.activateWindow()
-                ))
+                self.window_manager.register_window("seer_wait", self.seer_window)
+                self.window_manager.navigate_to("seer_wait")
+                print("[DEBUG] SeerWaitWindow navigated successfully")
                 # For non-seer players, wait for seer_duration then move to guard phase
                 QtCore.QTimer.singleShot(self.seer_duration * 1000, self._on_seer_phase_timeout)
             except Exception as e:
@@ -121,24 +101,18 @@ class NightPhaseController:
         print(f"[DEBUG] Received seer result - target: {target_username}, is_werewolf: {is_werewolf}")
         self.seer_choice_made = True
         
-        # Close seer select window if still open
+        # Close seer select/wait screen if still open
         if self.seer_window:
-            self.seer_window.close()
+            try:
+                self.seer_window.close()
+            except Exception:
+                pass
             self.seer_window = None
         
         # Show result window
         self.seer_result_window = SeerResultWindow(target_username, is_werewolf)
-        self.seer_result_window.setWindowModality(QtCore.Qt.ApplicationModal)
-        # Center the window on screen
-        screen = QtWidgets.QApplication.desktop().screenGeometry()
-        window_geometry = self.seer_result_window.frameGeometry()
-        window_geometry.moveCenter(screen.center())
-        self.seer_result_window.move(window_geometry.topLeft())
-        self.seer_result_window.show()
-        self.seer_result_window.raise_()
-        self.seer_result_window.activateWindow()
-        # Force focus after a short delay
-        QtCore.QTimer.singleShot(100, lambda: self.seer_result_window.activateWindow())
+        self.window_manager.register_window("seer_result", self.seer_result_window)
+        self.window_manager.navigate_to("seer_result")
         
         # When result window is closed (OK button clicked), move to guard phase immediately
         # Connect to the OK button's clicked signal instead of destroyed
@@ -187,31 +161,15 @@ class NightPhaseController:
             print(f"[DEBUG] Guard select - full players data: {self.players}")
             # Đảm bảo truyền TẤT CẢ players vào GuardSelectWindow, không filter
             self.guard_window = GuardSelectWindow(self.players, self.my_username, self.guard_duration, self.network_client, self.room_id)
-            self.guard_window.setWindowModality(QtCore.Qt.ApplicationModal)
-            # Center the window on screen
-            screen = QtWidgets.QApplication.desktop().screenGeometry()
-            window_geometry = self.guard_window.frameGeometry()
-            window_geometry.moveCenter(screen.center())
-            self.guard_window.move(window_geometry.topLeft())
-            self.guard_window.show()
-            self.guard_window.raise_()
-            self.guard_window.activateWindow()
-            QtCore.QTimer.singleShot(100, lambda: self.guard_window.activateWindow())
+            self.window_manager.register_window("guard_select", self.guard_window)
+            self.window_manager.navigate_to("guard_select")
             # Guard window sẽ tự đóng khi guard chọn xong, nhưng không tự động chuyển sang wolf
             # Đợi server broadcast PHASE_WOLF_START (không connect destroyed signal)
         else:
             print("[DEBUG] User is not guard - showing GuardWaitWindow")
             self.guard_window = GuardWaitWindow(self.guard_duration)
-            self.guard_window.setWindowModality(QtCore.Qt.ApplicationModal)
-            # Center the window on screen
-            screen = QtWidgets.QApplication.desktop().screenGeometry()
-            window_geometry = self.guard_window.frameGeometry()
-            window_geometry.moveCenter(screen.center())
-            self.guard_window.move(window_geometry.topLeft())
-            self.guard_window.show()
-            self.guard_window.raise_()
-            self.guard_window.activateWindow()
-            QtCore.QTimer.singleShot(100, lambda: self.guard_window.activateWindow())
+            self.window_manager.register_window("guard_wait", self.guard_window)
+            self.window_manager.navigate_to("guard_wait")
             # Không tự động chuyển sang wolf phase - đợi server broadcast PHASE_WOLF_START
             # Timer chỉ để đóng window nếu cần
 
@@ -253,87 +211,67 @@ class NightPhaseController:
                 print(f"[WARNING] my_username {self.my_username} is in wolf_usernames but is_wolf is False! Fixing...")
                 self.is_wolf = True
         
+        my_is_alive = True
+        try:
+            for p in self.players:
+                if isinstance(p, dict) and p.get('username') == self.my_username:
+                    my_is_alive = int(p.get('is_alive', 1)) != 0
+                    break
+        except Exception:
+            my_is_alive = True
+
         if self.is_wolf:
             print("[DEBUG] User is wolf - showing WolfSelectWindow")
-            from .roles.wolf.wolf_select_window import WolfSelectWindow
-            from .roles.wolf.wolf_chat_window import WolfChatWindow
-            
-            # Tạo WolfSelectWindow trực tiếp
-            self.wolf_controller = WolfSelectWindow(
-                player_list, alive_status, self.my_username, 
-                duration_seconds=self.wolf_duration,
-                network_client=self.network_client, room_id=self.room_id
-            )
-            
-            # Tạo chat window và connect button
-            self.wolf_chat_window = None
-            def show_chat():
-                if not self.wolf_chat_window:
-                    # Create send callback for wolf chat
-                    def send_wolf_chat(message):
-                        try:
-                            if self.network_client and self.room_id:
-                                payload = {
-                                    "room_id": self.room_id,
-                                    "message": message
-                                }
-                                self.network_client.send_packet(401, payload)  # CHAT_REQ
-                                print(f"[DEBUG] Sent wolf chat: {message}")
-                        except Exception as e:
-                            print(f"[ERROR] Failed to send wolf chat: {e}")
 
-                    self.wolf_chat_window = WolfChatWindow(
-                        self.my_username, self.wolf_usernames,
-                        send_callback=send_wolf_chat,
-                        network_client=self.network_client,
-                        room_id=self.room_id
-                    )
-                    self.wolf_chat_window.setWindowModality(QtCore.Qt.ApplicationModal)
-                    # Center chat window
-                    screen = QtWidgets.QApplication.desktop().screenGeometry()
-                    window_geometry = self.wolf_chat_window.frameGeometry()
-                    window_geometry.moveCenter(screen.center())
-                    self.wolf_chat_window.move(window_geometry.topLeft())
-                    # Button để quay lại select window
-                    if hasattr(self.wolf_chat_window, 'switch_btn'):
-                        self.wolf_chat_window.switch_btn.clicked.connect(show_select)
-                self.wolf_controller.hide()
-                self.wolf_chat_window.show()
-                self.wolf_chat_window.raise_()
-                self.wolf_chat_window.activateWindow()
-            
-            def show_select():
-                if self.wolf_chat_window:
-                    self.wolf_chat_window.hide()
-                self.wolf_controller.show()
-                self.wolf_controller.raise_()
-                self.wolf_controller.activateWindow()
-            
-            # Connect chat button
-            if hasattr(self.wolf_controller, 'chat_btn'):
-                self.wolf_controller.chat_btn.clicked.connect(show_chat)
-            
-            self.wolf_controller.setWindowModality(QtCore.Qt.ApplicationModal)
-            # Center the window on screen
-            screen = QtWidgets.QApplication.desktop().screenGeometry()
-            window_geometry = self.wolf_controller.frameGeometry()
-            window_geometry.moveCenter(screen.center())
-            self.wolf_controller.move(window_geometry.topLeft())
-            self.wolf_controller.show()
-            self.wolf_controller.raise_()
-            self.wolf_controller.activateWindow()
-            QtCore.QTimer.singleShot(100, lambda: self.wolf_controller.activateWindow())
+            self.wolf_controller = WolfSelectWindow(
+                player_list,
+                alive_status,
+                self.my_username,
+                duration_seconds=self.wolf_duration,
+                network_client=self.network_client,
+                room_id=self.room_id,
+                can_vote=my_is_alive,
+            )
+            self.window_manager.register_window("wolf_select", self.wolf_controller)
+
+            # Create (or reuse) chat screen. This remains an overlay screen managed by WindowManager.
+            if not hasattr(self, "wolf_chat_window"):
+                self.wolf_chat_window = None
+
+            def _send_wolf_chat(message: str):
+                try:
+                    if self.network_client and self.room_id:
+                        payload = {"room_id": self.room_id, "message": message}
+                        self.network_client.send_packet(401, payload)  # CHAT_REQ
+                        print(f"[DEBUG] Sent wolf chat: {message}")
+                except Exception as e:
+                    print(f"[ERROR] Failed to send wolf chat: {e}")
+
+            if self.wolf_chat_window is None:
+                self.wolf_chat_window = WolfChatWindow(
+                    self.my_username,
+                    self.wolf_usernames,
+                    send_callback=_send_wolf_chat,
+                    duration_seconds=getattr(self.wolf_controller, "remaining", self.wolf_duration),
+                    network_client=self.network_client,
+                    room_id=self.room_id,
+                )
+                self.window_manager.register_window("wolf_chat", self.wolf_chat_window)
+
+            # Wire navigation buttons
+            if hasattr(self.wolf_controller, "chat_btn"):
+                self.wolf_controller.chat_btn.clicked.connect(lambda: self.window_manager.navigate_to("wolf_chat"))
+            if hasattr(self.wolf_chat_window, "switch_btn"):
+                self.wolf_chat_window.switch_btn.clicked.connect(lambda: self.window_manager.navigate_to("wolf_select"))
+
+            # Sync countdown each time we open chat
+            if hasattr(self.wolf_chat_window, "sync_remaining"):
+                self.wolf_chat_window.sync_remaining(getattr(self.wolf_controller, "remaining", self.wolf_duration))
+
+            self.window_manager.navigate_to("wolf_select")
         else:
             print("[DEBUG] User is not wolf - showing WolfWaitWindow")
             self.wolf_controller = WolfWaitWindow(self.wolf_duration)
-            self.wolf_controller.setWindowModality(QtCore.Qt.ApplicationModal)
-            # Center the window on screen
-            screen = QtWidgets.QApplication.desktop().screenGeometry()
-            window_geometry = self.wolf_controller.frameGeometry()
-            window_geometry.moveCenter(screen.center())
-            self.wolf_controller.move(window_geometry.topLeft())
-            self.wolf_controller.show()
-            self.wolf_controller.raise_()
-            self.wolf_controller.activateWindow()
-            QtCore.QTimer.singleShot(100, lambda: self.wolf_controller.activateWindow())
+            self.window_manager.register_window("wolf_wait", self.wolf_controller)
+            self.window_manager.navigate_to("wolf_wait")
             # Không tự động đóng - sẽ đợi server broadcast phase tiếp theo hoặc đóng khi nhận signal

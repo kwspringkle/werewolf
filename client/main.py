@@ -1,5 +1,6 @@
 # Main file để chạy ứng dụng Werewolf
 import sys
+import signal
 from pathlib import Path
 from PyQt5 import QtWidgets, QtCore
 
@@ -18,12 +19,28 @@ from windows.role_card_window import RoleCardWindow
 from windows.night_begin_window import NightBeginWindow
 from windows.death_announcement_window import DeathAnnouncementWindow
 from windows.day_chat_window import DayChatWindow
+from windows.roles.seer.seer_select_window import SeerSelectWindow
+from windows.roles.seer.seer_wait_window import SeerWaitWindow
+from windows.roles.seer.seer_result_window import SeerResultWindow
+from windows.roles.guard.guard_select_window import GuardSelectWindow
+from windows.roles.guard.guard_wait_window import GuardWaitWindow
+from windows.roles.wolf.wolf_select_window import WolfSelectWindow
+from windows.roles.wolf.wolf_wait_window import WolfWaitWindow
+from windows.roles.wolf.wolf_chat_window import WolfChatWindow
 
 
 class WerewolfApplication:    
     def __init__(self):
         self.app = QtWidgets.QApplication(sys.argv)
         self.app.setApplicationName("Werewolf Game")
+        # Prevent the whole client from exiting when transient night-phase dialogs close.
+        # Otherwise, if all main windows are hidden and the last dialog closes, Qt will quit,
+        # triggering cleanup() and disconnecting the socket (looks like "random disconnects").
+        self.app.setQuitOnLastWindowClosed(False)
+
+        # Graceful shutdown on Ctrl+C (SIGINT) / SIGTERM:
+        # make sure we quit the Qt loop so aboutToQuit->cleanup runs and socket disconnects cleanly.
+        self._install_signal_handlers()
         
         # Load stylesheet
         self.load_stylesheet()
@@ -62,6 +79,9 @@ class WerewolfApplication:
         
         # Tạo toast manager với welcome window làm parent
         self.toast_manager = ToastManager(self.welcome_window)
+
+        # Share toast manager for any dynamically created windows (e.g., night role windows)
+        self.window_manager.set_shared_data("toast_manager", self.toast_manager)
         
         # Cập nhật toast manager cho welcome window
         self.welcome_window.toast_manager = self.toast_manager
@@ -90,7 +110,7 @@ class WerewolfApplication:
             self.toast_manager,
             self.window_manager
         )
-        
+
         self.night_begin_window = NightBeginWindow(
             self.toast_manager,
             self.window_manager
@@ -105,6 +125,17 @@ class WerewolfApplication:
             self.toast_manager,
             self.window_manager
         )
+
+        # Night role screens. These instances will be refreshed/overwritten by NightPhaseController as needed,
+        # but registering defaults here avoids "window not registered" when navigating.
+        self.window_manager.register_window("seer_select", SeerSelectWindow([], "", 30, None, None, window_manager=self.window_manager, toast_manager=self.toast_manager))
+        self.window_manager.register_window("seer_wait", SeerWaitWindow(30, window_manager=self.window_manager, toast_manager=self.toast_manager))
+        self.window_manager.register_window("seer_result", SeerResultWindow("", False, window_manager=self.window_manager, toast_manager=self.toast_manager))
+        self.window_manager.register_window("guard_select", GuardSelectWindow([], "", 30, None, None, window_manager=self.window_manager, toast_manager=self.toast_manager))
+        self.window_manager.register_window("guard_wait", GuardWaitWindow(30, window_manager=self.window_manager, toast_manager=self.toast_manager))
+        self.window_manager.register_window("wolf_select", WolfSelectWindow([], [], "", 60, None, None, window_manager=self.window_manager, toast_manager=self.toast_manager))
+        self.window_manager.register_window("wolf_wait", WolfWaitWindow(60, window_manager=self.window_manager, toast_manager=self.toast_manager))
+        self.window_manager.register_window("wolf_chat", WolfChatWindow("", [], duration_seconds=60, window_manager=self.window_manager, toast_manager=self.toast_manager))
         
         # Đăng ký các cửa sổ
         self.window_manager.register_window("welcome", self.welcome_window)
@@ -127,6 +158,32 @@ class WerewolfApplication:
         
         # Bắt đầu vòng lặp sự kiện
         return self.app.exec_()
+
+    def _install_signal_handlers(self):
+        """Install SIGINT/SIGTERM handler so Ctrl+C in terminal closes the client cleanly."""
+        # A small timer keeps the Python interpreter responsive to signals while Qt loop is running.
+        self._signal_timer = QtCore.QTimer()
+        self._signal_timer.start(250)
+        self._signal_timer.timeout.connect(lambda: None)
+
+        def _handle_sig(_signum, _frame):
+            try:
+                print("[DEBUG] Signal received, shutting down client...")
+            except Exception:
+                pass
+            try:
+                self.app.quit()
+            except Exception:
+                pass
+
+        try:
+            signal.signal(signal.SIGINT, _handle_sig)
+        except Exception:
+            pass
+        try:
+            signal.signal(signal.SIGTERM, _handle_sig)
+        except Exception:
+            pass
         
     def cleanup(self):
         """Dọn dẹp tài nguyên"""
