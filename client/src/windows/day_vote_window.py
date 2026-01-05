@@ -84,9 +84,17 @@ class DayVoteWindow(QtWidgets.QWidget):
         # Reset vote state
         self.selected_username = None
         self.has_voted = False
+
+        # Dead voter hint + disable voting UI
+        if hasattr(self, "dead_hint_label"):
+            self.dead_hint_label.setVisible(not bool(self.my_is_alive))
+        if not self.my_is_alive:
+            self.submit_btn.setEnabled(False)
+            self.skip_btn.setEnabled(False)
         
-        # Start timer
-        self.start_timer()
+        # Only run local countdown if we don't have a shared server deadline
+        if not deadline:
+            self.start_timer()
 
     def hideEvent(self, event):
         """Called when window is hidden"""
@@ -137,6 +145,19 @@ class DayVoteWindow(QtWidgets.QWidget):
             border-radius: 5px;
         """)
         self.card_layout.addWidget(self.timer_label)
+
+        # Hint for dead voters
+        self.dead_hint_label = QtWidgets.QLabel("Bạn đã chết nên không thể vote")
+        self.dead_hint_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.dead_hint_label.setVisible(False)
+        self.dead_hint_label.setStyleSheet("""
+            font-size: 12px;
+            color: #f39c12;
+            background-color: rgba(243, 156, 18, 0.12);
+            padding: 6px;
+            border-radius: 6px;
+        """)
+        self.card_layout.addWidget(self.dead_hint_label)
 
         # Header
         header_v = QtWidgets.QVBoxLayout()
@@ -285,9 +306,7 @@ class DayVoteWindow(QtWidgets.QWidget):
             except Exception:
                 is_alive = True
             
-            # Skip myself
-            if username == self.my_username:
-                continue
+            is_self = (username == self.my_username)
 
             card_item = QtWidgets.QFrame()
             card_item.setObjectName("user_card")
@@ -307,7 +326,13 @@ class DayVoteWindow(QtWidgets.QWidget):
             icon_label.setStyleSheet("font-size: 32px; padding-top: 5px;")
             card_item_layout.addWidget(icon_label)
 
-            name_label = QtWidgets.QLabel(username + ("\n(Dead)" if not is_alive else ""))
+            label_name = username
+            if is_self:
+                label_name = f"{label_name}\n(You)"
+            if not is_alive:
+                label_name = label_name + "\n(Dead)"
+
+            name_label = QtWidgets.QLabel(label_name)
             name_label.setAlignment(QtCore.Qt.AlignCenter)
             name_label.setStyleSheet(f"""
                 font-size: 11px;
@@ -396,6 +421,10 @@ class DayVoteWindow(QtWidgets.QWidget):
 
     def on_submit_vote(self):
         """Submit vote"""
+        if not self.my_is_alive:
+            if self.toast_manager:
+                self.toast_manager.warning("You are dead. You cannot vote.")
+            return
         if not self.selected_username:
             if self.toast_manager:
                 self.toast_manager.warning("Please select a player to vote!")
@@ -439,7 +468,12 @@ class DayVoteWindow(QtWidgets.QWidget):
                 self.toast_manager.warning("You have already voted!")
             return
         
-        # Send empty vote or close window
+        if not self.my_is_alive:
+            if self.toast_manager:
+                self.toast_manager.warning("Bạn đã chết nên không thể vote")
+            return
+
+        # Send empty vote to server as skip
         if self.toast_manager:
             self.toast_manager.info("You skipped voting")
         
@@ -447,8 +481,11 @@ class DayVoteWindow(QtWidgets.QWidget):
         self.submit_btn.setEnabled(False)
         self.skip_btn.setEnabled(False)
         
-        # Optionally send a skip vote to server
-        # For now, just disable UI
+        try:
+            if self.network_client and self.current_room_id:
+                self.network_client.send_day_vote(self.current_room_id, "")
+        except Exception as e:
+            print(f"[WARNING] Failed to send skip vote: {e}")
 
     def on_go_to_chat(self):
         """Navigate to day chat window"""
@@ -464,25 +501,8 @@ class DayVoteWindow(QtWidgets.QWidget):
             self.window_manager.navigate_to("welcome")
     
     def closeEvent(self, event):
-        """Xử lý khi đóng cửa sổ - cleanup network client"""
+        """Xử lý khi đóng cửa sổ"""
         if hasattr(self, 'timer') and self.timer:
             self.timer.stop()
-        
-        # Check if closing by navigation or by user clicking X
-        is_navigation = getattr(self, '_closing_by_navigation', False)
-        
-        if not is_navigation:
-            # User clicked X button - cleanup and quit
-            print("[DEBUG] Day vote window closing by user, cleaning up...")
-            try:
-                if self.network_client:
-                    self.network_client.disconnect()
-            except Exception as e:
-                print(f"[ERROR] Error during day vote cleanup: {e}")
-            
-            event.accept()
-            # Quit application
-            QtWidgets.QApplication.instance().quit()
-        else:
-            # Closing by navigation - just accept
-            event.accept()
+        # Never disconnect the shared network client here.
+        event.accept()

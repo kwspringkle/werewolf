@@ -11,66 +11,6 @@ from pathlib import Path
 
 
 class WerewolfNetworkClient:
-    def send_role_card_done(self, room_id=None):
-        """Notify server that this client finished viewing role card.
-
-        Prefer a dedicated C wrapper if available; fallback to send_packet(310,...)
-        so older DLL/SO builds still work.
-        """
-        if not self.client:
-            raise RuntimeError("Client not created")
-
-        if hasattr(self.lib, 'ww_client_role_card_done_send'):
-            rid = int(room_id) if room_id is not None else 0
-            result = self.lib.ww_client_role_card_done_send(self.client, rid)
-            if result < 0:
-                raise RuntimeError(f"Send role card done failed: {self.get_error()}")
-            return result
-
-        payload = {}
-        if room_id is not None:
-            payload["room_id"] = int(room_id)
-        return self.send_packet(310, payload)  # ROLE_CARD_DONE_REQ
-    def send_wolf_kill(self, room_id, target_username):
-        """Gửi yêu cầu sói cắn (wolf kill)"""
-        if not self.client:
-            raise RuntimeError("Client not created")
-        if not hasattr(self.lib, 'ww_client_wolf_kill_send'):
-            raise RuntimeError("C library missing wolf kill send")
-        if not isinstance(target_username, str):
-            raise ValueError("target_username must be a string")
-        result = self.lib.ww_client_wolf_kill_send(self.client, int(room_id), target_username.encode('utf-8'))
-        if result < 0:
-            error = self.get_error()
-            raise RuntimeError(f"Send wolf kill failed: {error}")
-        return result
-    def send_seer_check(self, room_id, target_username):
-        """Gửi yêu cầu tiên tri (seer check)"""
-        if not self.client:
-            raise RuntimeError("Client not created")
-        if not hasattr(self.lib, 'ww_client_seer_check_send'):
-            raise RuntimeError("C library missing seer check send")
-        if not isinstance(target_username, str):
-            raise ValueError("target_username must be a string")
-        result = self.lib.ww_client_seer_check_send(self.client, int(room_id), target_username.encode('utf-8'))
-        if result < 0:
-            error = self.get_error()
-            raise RuntimeError(f"Send seer check failed: {error}")
-        return result
-    def send_guard_protect(self, room_id, target_username):
-        """Gửi yêu cầu bảo vệ (guard protect)"""
-        if not self.client:
-            raise RuntimeError("Client not created")
-        if not hasattr(self.lib, 'ww_client_guard_protect_send'):
-            raise RuntimeError("C library missing guard protect send")
-        if not isinstance(target_username, str):
-            raise ValueError("target_username must be a string")
-        result = self.lib.ww_client_guard_protect_send(self.client, int(room_id), target_username.encode('utf-8'))
-        if result < 0:
-            error = self.get_error()
-            raise RuntimeError(f"Send guard protect failed: {error}")
-        return result
-
     """Python wrapper cho C Werewolf Network Client, sử dụng ctypes"""
     
     def __init__(self):
@@ -171,7 +111,17 @@ class WerewolfNetworkClient:
         if hasattr(self.lib, 'ww_client_guard_protect_send'):
             self.lib.ww_client_guard_protect_send.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_char_p]
             self.lib.ww_client_guard_protect_send.restype = ctypes.c_int
-        
+
+        # ww_client_ping_send(client) -> int
+        if hasattr(self.lib, 'ww_client_ping_send'):
+            self.lib.ww_client_ping_send.argtypes = [ctypes.c_void_p]
+            self.lib.ww_client_ping_send.restype = ctypes.c_int
+
+        # ww_client_pong_send(client) -> int
+        if hasattr(self.lib, 'ww_client_pong_send'):
+            self.lib.ww_client_pong_send.argtypes = [ctypes.c_void_p]
+            self.lib.ww_client_pong_send.restype = ctypes.c_int
+    
     def create(self):
         """Tạo instance client"""
         self.client = self.lib.ww_client_create()
@@ -269,3 +219,121 @@ class WerewolfNetworkClient:
     def __del__(self):
         """Dọn dẹp khi đối tượng bị hủy"""
         self.destroy()
+
+    def send_role_card_done(self, room_id=None):
+        """Notify server that this client finished viewing role card.
+
+        Prefer a dedicated C wrapper if available; fallback to send_packet(310,...)
+        so older DLL/SO builds still work.
+        """
+        if not self.client:
+            raise RuntimeError("Client not created")
+
+        if hasattr(self.lib, 'ww_client_role_card_done_send'):
+            rid = int(room_id) if room_id is not None else 0
+            result = self.lib.ww_client_role_card_done_send(self.client, rid)
+            if result < 0:
+                raise RuntimeError(f"Send role card done failed: {self.get_error()}")
+            return result
+
+        payload = {}
+        if room_id is not None:
+            payload["room_id"] = int(room_id)
+        return self.send_packet(310, payload)  # ROLE_CARD_DONE_REQ
+
+    def send_wolf_kill(self, room_id, target_username):
+        """Gửi yêu cầu sói cắn (wolf kill)"""
+        if not self.client:
+            raise RuntimeError("Client not created")
+        if not hasattr(self.lib, 'ww_client_wolf_kill_send'):
+            raise RuntimeError("C library missing wolf kill send")
+        if not isinstance(target_username, str):
+            raise ValueError("target_username must be a string")
+        result = self.lib.ww_client_wolf_kill_send(self.client, int(room_id), target_username.encode('utf-8'))
+        if result < 0:
+            error = self.get_error()
+            raise RuntimeError(f"Send wolf kill failed: {error}")
+        return result
+
+    def send_seer_check(self, room_id, target_username):
+        """Gửi yêu cầu tiên tri (seer check)"""
+        if not self.client:
+            raise RuntimeError("Client not created")
+        if not hasattr(self.lib, 'ww_client_seer_check_send'):
+            raise RuntimeError("C library missing seer check send")
+        if not isinstance(target_username, str):
+            raise ValueError("target_username must be a string")
+        result = self.lib.ww_client_seer_check_send(self.client, int(room_id), target_username.encode('utf-8'))
+        if result < 0:
+            error = self.get_error()
+            raise RuntimeError(f"Send seer check failed: {error}")
+        return result
+
+    def send_guard_protect(self, room_id, target_username):
+        """Gửi yêu cầu bảo vệ (GUARD_PROTECT_REQ = 407).
+
+        Prefer dedicated C wrapper if available; fallback to send_packet.
+        """
+        if room_id is None:
+            raise ValueError("room_id is required")
+        if target_username is None:
+            target_username = ""
+
+        if hasattr(self.lib, 'ww_client_guard_protect_send') and self.client:
+            if not isinstance(target_username, str):
+                raise ValueError("target_username must be a string")
+            result = self.lib.ww_client_guard_protect_send(self.client, int(room_id), target_username.encode('utf-8'))
+            if result < 0:
+                error = self.get_error()
+                raise RuntimeError(f"Send guard protect failed: {error}")
+            return result
+
+        return self.send_packet(407, {
+            "room_id": int(room_id),
+            "target_username": str(target_username),
+        })
+
+    def send_day_vote(self, room_id, target_username):
+        """Gửi vote ban ngày (VOTE_REQ = 409). target_username có thể là "" để skip."""
+        if room_id is None:
+            raise ValueError("room_id is required")
+        if target_username is None:
+            target_username = ""
+        return self.send_packet(409, {
+            "room_id": int(room_id),
+            "target_username": str(target_username),
+        })
+
+    def send_ping(self):
+        """Client-initiated heartbeat ping (PING = 501).
+
+        Prefer dedicated C helper if available; fallback to send_packet.
+        """
+        if not self.client:
+            raise RuntimeError("Client not created")
+
+        if hasattr(self.lib, 'ww_client_ping_send'):
+            result = self.lib.ww_client_ping_send(self.client)
+            if result < 0:
+                raise RuntimeError(f"Send ping failed: {self.get_error()}")
+            return result
+
+        return self.send_packet(501, {"type": "ping"})
+
+    def send_pong(self):
+        """Reply to server PING (PONG = 502).
+
+        Prefer dedicated C helper if available; fallback to send_packet.
+        """
+        if not self.client:
+            raise RuntimeError("Client not created")
+
+        if hasattr(self.lib, 'ww_client_pong_send'):
+            result = self.lib.ww_client_pong_send(self.client)
+            if result < 0:
+                raise RuntimeError(f"Send pong failed: {self.get_error()}")
+            return result
+
+        return self.send_packet(502, {"type": "pong"})
+
+

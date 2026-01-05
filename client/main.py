@@ -19,6 +19,8 @@ from windows.role_card_window import RoleCardWindow
 from windows.night_begin_window import NightBeginWindow
 from windows.death_announcement_window import DeathAnnouncementWindow
 from windows.day_chat_window import DayChatWindow
+from windows.day_vote_window import DayVoteWindow
+from windows.game_result_window import GameResultWindow
 from windows.roles.seer.seer_select_window import SeerSelectWindow
 from windows.roles.seer.seer_wait_window import SeerWaitWindow
 from windows.roles.seer.seer_result_window import SeerResultWindow
@@ -126,6 +128,16 @@ class WerewolfApplication:
             self.window_manager
         )
 
+        self.day_vote_window = DayVoteWindow(
+            self.toast_manager,
+            self.window_manager
+        )
+
+        self.game_result_window = GameResultWindow(
+            self.toast_manager,
+            self.window_manager
+        )
+
         # Night role screens. These instances will be refreshed/overwritten by NightPhaseController as needed,
         # but registering defaults here avoids "window not registered" when navigating.
         self.window_manager.register_window("seer_select", SeerSelectWindow([], "", 30, None, None, window_manager=self.window_manager, toast_manager=self.toast_manager))
@@ -147,6 +159,8 @@ class WerewolfApplication:
         self.window_manager.register_window("night_begin", self.night_begin_window)
         self.window_manager.register_window("death_announcement", self.death_announcement_window)
         self.window_manager.register_window("day_chat", self.day_chat_window)
+        self.window_manager.register_window("day_vote", self.day_vote_window)
+        self.window_manager.register_window("game_result", self.game_result_window)
         
         # Kết nối cleanup
         self.app.aboutToQuit.connect(self.cleanup)

@@ -29,6 +29,11 @@ class RoomWindow(QtWidgets.QWidget):
         self.recv_timer = QtCore.QTimer()
         self.recv_timer.timeout.connect(self.receive_packets)
 
+        # Day phase shared timer (updates vote panel countdown)
+        self.day_timer = QtCore.QTimer()
+        self.day_timer.timeout.connect(self._update_day_timer)
+        self._day_deadline = None
+
         # Connection monitor
         self.connection_monitor = None
         
@@ -400,11 +405,21 @@ class RoomWindow(QtWidgets.QWidget):
             
     def handle_packet(self, header, payload):
         """Xử lý gói tin nhận được"""
+        # Any inbound traffic means the connection is alive.
+        try:
+            if self.connection_monitor:
+                self.connection_monitor.on_activity()
+        except Exception:
+            pass
+
         # Handle PING from server
         if header == 501:  # PING
             try:
-                # Reply with proper PONG header (502). Payload is kept for compatibility/logging.
-                self.network_client.send_packet(502, {"type": "pong"})
+                # Reply with proper PONG header (502).
+                if hasattr(self.network_client, "send_pong"):
+                    self.network_client.send_pong()
+                else:
+                    self.network_client.send_packet(502, {"type": "pong"})
                 if self.connection_monitor:
                     self.connection_monitor.on_pong_received()
             except:
@@ -427,6 +442,15 @@ class RoomWindow(QtWidgets.QWidget):
                         day_chat.handle_chat_broadcast(payload)
             except Exception as e:
                 print(f"[WARNING] Failed to dispatch CHAT_BROADCAST: {e}")
+            return
+
+        # Day vote events
+        if header == 411:  # VOTE_RESULT
+            self._handle_vote_result(payload)
+            return
+
+        if header == 305:  # GAME_OVER
+            self._handle_game_over(payload)
             return
 
         username = self.window_manager.get_shared_data("username")
@@ -522,27 +546,8 @@ class RoomWindow(QtWidgets.QWidget):
                 game_started = payload.get("game_started", False)
                 
                 if game_started:
-                    # Sau khi game start: mark as dead
-                    self.toast_manager.error(f"💀 {player_username} disconnected - Marked as DEAD")
-
-                    # Update shared room_players so other UIs (chat) can disable sending
-                    try:
-                        room_players = self.window_manager.get_shared_data("room_players", [])
-                        if isinstance(room_players, list):
-                            for p in room_players:
-                                if isinstance(p, dict) and p.get("username") == player_username:
-                                    p["is_alive"] = 0
-                            self.window_manager.set_shared_data("room_players", room_players)
-                    except Exception as e:
-                        print(f"[WARNING] Failed to update room_players on disconnect: {e}")
-                    
-                    # Mark player as dead in list
-                    for i in range(self.player_list.count()):
-                        item = self.player_list.item(i)
-                        if player_username in item.text() and "💀" not in item.text():
-                            item.setText(f"💀 {player_username} (DEAD)")
-                            item.setForeground(QtGui.QColor("#555555"))  # Gray
-                            break
+                    # In-game disconnect: do NOT mark as dead (server allows reconnect).
+                    self.toast_manager.warning(f"⚠️ {player_username} disconnected")
                 else:
                     # Trước khi game start: treat như player_left
                     current = payload.get("current_players", 0)
@@ -662,6 +667,10 @@ class RoomWindow(QtWidgets.QWidget):
             # Only the seer will receive this normally
             status = payload.get("status")
             if status == "success":
+                if isinstance(payload, dict) and (payload.get("skipped") or not payload.get("target_username")):
+                    # Seer skipped (or is dead); wait for PHASE_GUARD_START.
+                    return
+
                 target = payload.get("target_username")
                 is_wolf = bool(payload.get("is_werewolf"))
                 # Get night phase controller from shared data
@@ -816,6 +825,173 @@ class RoomWindow(QtWidgets.QWidget):
                 print("[ERROR] Death announcement window not registered")
                 # Fallback: navigate directly to day chat
                 self.window_manager.navigate_to("day_chat")
+
+            # Start/refresh day-phase shared vote deadline (120s) if provided
+            try:
+                import time
+                day_deadline = payload.get("day_deadline") if isinstance(payload, dict) else None
+                if day_deadline:
+                    self.window_manager.set_shared_data("day_vote_deadline", float(day_deadline))
+                    self.window_manager.set_shared_data("day_remaining_time", max(0, int(float(day_deadline) - time.time())))
+                    self.window_manager.set_shared_data("day_vote_candidates", None)
+                    self.window_manager.set_shared_data("day_vote_selected_username", None)
+                    self._start_day_timer(float(day_deadline))
+            except Exception as e:
+                print(f"[WARNING] Failed to init day timer from PHASE_DAY: {e}")
+
+    def _start_day_timer(self, deadline: float):
+        self._day_deadline = float(deadline) if deadline else None
+        if self._day_deadline:
+            if not self.day_timer.isActive():
+                self.day_timer.start(1000)
+
+    def _stop_day_timer(self):
+        self._day_deadline = None
+        if self.day_timer.isActive():
+            self.day_timer.stop()
+
+    def _update_day_timer(self):
+        if not self._day_deadline:
+            self._stop_day_timer()
+            return
+
+        import time
+        remaining = max(0, int(self._day_deadline - time.time()))
+        self.window_manager.set_shared_data("day_remaining_time", remaining)
+
+        try:
+            vote_win = self.window_manager.windows.get("day_vote")
+            if vote_win and vote_win.isVisible() and hasattr(vote_win, "timer_label"):
+                vote_win.timer_label.setText(f"⏱️ {remaining}s")
+        except Exception:
+            pass
+
+        try:
+            chat_win = self.window_manager.windows.get("day_chat")
+            if chat_win and chat_win.isVisible() and hasattr(chat_win, "timer_label"):
+                chat_win.timer_label.setText(f"⏱️ {remaining}s")
+        except Exception:
+            pass
+
+        if remaining <= 0:
+            self._stop_day_timer()
+
+    def _handle_vote_result(self, payload):
+        if not isinstance(payload, dict):
+            return
+
+        ev_type = payload.get("type")
+
+        if ev_type == "tie_break_start":
+            candidates = payload.get("candidates", [])
+            deadline = payload.get("deadline")
+            try:
+                if isinstance(candidates, list):
+                    self.window_manager.set_shared_data("day_vote_candidates", candidates)
+
+                    # Clear persisted selection if it is no longer valid
+                    current_sel = self.window_manager.get_shared_data("day_vote_selected_username")
+                    if current_sel and current_sel not in candidates:
+                        self.window_manager.set_shared_data("day_vote_selected_username", None)
+                if deadline:
+                    self.window_manager.set_shared_data("day_vote_deadline", float(deadline))
+                    self._start_day_timer(float(deadline))
+
+                vote_win = self.window_manager.windows.get("day_vote")
+                if vote_win and hasattr(vote_win, "rebuild_player_cards"):
+                    vote_win.rebuild_player_cards()
+            except Exception as e:
+                print(f"[WARNING] Failed to apply tie_break_start: {e}")
+            return
+
+        if ev_type == "execution_random_selected":
+            selected = payload.get("selected")
+            if selected:
+                msg = f"Do kết quả hòa phiếu, hệ thống random chọn: {selected}"
+                try:
+                    if self.toast_manager:
+                        self.toast_manager.warning(msg)
+                except Exception:
+                    pass
+                try:
+                    day_chat = self.window_manager.windows.get("day_chat")
+                    if day_chat and hasattr(day_chat, "append_message"):
+                        day_chat.append_message("System", msg)
+                except Exception:
+                    pass
+            return
+
+        if ev_type == "player_executed":
+            player_id = payload.get("playerId")
+            if player_id:
+                # Update shared alive state
+                try:
+                    players = self.window_manager.get_shared_data("room_players", [])
+                    if isinstance(players, list):
+                        for p in players:
+                            if isinstance(p, dict) and p.get("username") == player_id:
+                                p["is_alive"] = 0
+                        self.window_manager.set_shared_data("room_players", players)
+                except Exception:
+                    pass
+
+                # Refresh day chat send permissions if visible
+                try:
+                    day_chat = self.window_manager.windows.get("day_chat")
+                    if day_chat and hasattr(day_chat, "refresh_chat_permissions"):
+                        day_chat.refresh_chat_permissions()
+                except Exception:
+                    pass
+
+                # Refresh vote panel list if visible
+                try:
+                    vote_win = self.window_manager.windows.get("day_vote")
+                    if vote_win and hasattr(vote_win, "rebuild_player_cards"):
+                        vote_win.rebuild_player_cards()
+                except Exception:
+                    pass
+
+            return
+
+    def _handle_game_over(self, payload):
+        if not isinstance(payload, dict):
+            return
+
+        winner = payload.get("winner")
+        players = payload.get("players", [])
+
+        # Map numeric role -> string expected by GameResultWindow
+        role_map = {0: "villager", 1: "werewolf", 2: "seer", 3: "guard"}
+        reveal = []
+        if isinstance(players, list):
+            for p in players:
+                if not isinstance(p, dict):
+                    continue
+                try:
+                    role_num = int(p.get("role", 0))
+                except Exception:
+                    role_num = 0
+                reveal.append({
+                    "username": p.get("username", ""),
+                    "role": role_map.get(role_num, "villager"),
+                    "is_alive": p.get("is_alive", 0),
+                })
+
+        try:
+            game_result = self.window_manager.windows.get("game_result")
+            if game_result and hasattr(game_result, "set_game_result"):
+                game_result.set_game_result(winner_team=winner, players_with_roles=reveal)
+
+            # Hide extra windows (vote panel etc.) and show results
+            try:
+                if hasattr(self.window_manager, "hide_all_except"):
+                    self.window_manager.hide_all_except({"game_result"})
+            except Exception:
+                pass
+
+            self.window_manager.navigate_to("game_result")
+        except Exception as e:
+            print(f"[WARNING] Failed to navigate to game_result: {e}")
     
     def start_night_phase(self, duration, seer_duration=30, guard_duration=30, wolf_duration=30):
         """Bắt đầu night phase (được gọi khi nhận PHASE_NIGHT từ server)"""

@@ -97,6 +97,16 @@ int ww_client_send(WerewolfClient* c, unsigned short header, const char* json) {
     return total_sent;
 }
 
+int ww_client_ping_send(WerewolfClient* c) {
+    // Client-initiated ping to keep connection active / detect dead links.
+    return ww_client_send(c, PING, "{\"type\":\"ping\"}");
+}
+
+int ww_client_pong_send(WerewolfClient* c) {
+    // Reply to server PING.
+    return ww_client_send(c, PONG, "{\"type\":\"pong\"}");
+}
+
 // Hàm nhận dữ liệu (non-blocking)
 static int ensure_capacity(WerewolfClient* c, size_t need) {
     if (need <= c->rbuf_cap) return 1;
@@ -152,20 +162,6 @@ int ww_client_receive(WerewolfClient* c, unsigned short* h, char* out, int max) 
     return header;
 }
 
-int ww_client_player_ready_send(WerewolfClient* c, int is_ready) {
-    if (!c || !c->is_connected) return -1;
-
-    char json[256];
-    int n = snprintf(json, sizeof(json), "{\"is_ready\":%s}",
-                     is_ready ? "true" : "false");
-    if (n < 0 || n >= (int)sizeof(json)) {
-        set_error(c, "Player ready JSON too large");
-        return -1;
-    }
-
-    return ww_client_send(c, ROLE_CARD_DONE_REQ, json);
-}
-
 int ww_client_seer_check_send(WerewolfClient* c, int room_id, const char* target_username) {
     if (!c || !c->is_connected || !target_username) return -1;
 
@@ -180,43 +176,6 @@ int ww_client_seer_check_send(WerewolfClient* c, int room_id, const char* target
     return ww_client_send(c, SEER_CHECK_REQ, json);
 }
 
-
-int ww_client_wait_for_seer_result(WerewolfClient* c, int timeout_seconds, char* out_payload, int max_size) {
-    if (!c || !c->is_connected || !out_payload || max_size <= 0) return -1;
-
-    time_t end = time(NULL) + timeout_seconds;
-    while (1) {
-        unsigned short header = 0;
-        int r = ww_client_receive(c, &header, out_payload, max_size);
-        if (r < 0) return -1; // error
-        if (r > 0) {
-            // got a full packet; return its header
-            return header;
-        }
-
-        // no full packet yet; wait for socket readability until deadline
-        time_t now = time(NULL);
-        if (now >= end) return 0; // timeout
-
-        fd_set rfds;
-        FD_ZERO(&rfds);
-        FD_SET(c->sock, &rfds);
-        struct timeval tv;
-        long rem = end - now;
-        tv.tv_sec = rem > 0 ? rem : 0;
-        tv.tv_usec = 0;
-
-        int sel = select(c->sock + 1, &rfds, NULL, NULL, &tv);
-        if (sel < 0) {
-            set_error(c, "select() failed");
-            return -1;
-        }
-        if (sel == 0) {
-            return 0; // timeout
-        }
-        // else socket readable, loop to call ww_client_receive again
-    }
-}
 
 // Hàm gửi yêu cầu sói cắn (werewolf kill)
 int ww_client_wolf_kill_send(WerewolfClient* c, int room_id, const char* target_username) {

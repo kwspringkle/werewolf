@@ -37,6 +37,19 @@ class DayChatWindow(QtWidgets.QWidget):
         # Update chat permissions (dead users can't send)
         self.refresh_chat_permissions()
 
+        # Initialize countdown label from shared deadline if available
+        try:
+            import time
+            deadline = self.window_manager.get_shared_data("day_vote_deadline") if self.window_manager else None
+            if deadline:
+                remaining = max(0, int(float(deadline) - time.time()))
+            else:
+                remaining = int(self.window_manager.get_shared_data("day_remaining_time", 0) or 0) if self.window_manager else 0
+            if hasattr(self, "timer_label"):
+                self.timer_label.setText(f"⏱️ {remaining}s")
+        except Exception:
+            pass
+
         # Packets are received by RoomWindow; this window only renders chat UI.
 
         # Add a welcome message to show chat is working
@@ -94,6 +107,19 @@ class DayChatWindow(QtWidgets.QWidget):
         username = payload.get("username", "Unknown")
         message = payload.get("message", "")
         self.append_message(username, message)
+
+    def on_go_to_vote(self):
+        """Navigate to day vote window."""
+        try:
+            if self.window_manager:
+                self.window_manager.navigate_to("day_vote")
+        except Exception as e:
+            try:
+                print(f"[ERROR] Failed to open day vote window: {e}")
+            except Exception:
+                pass
+            if self.toast_manager:
+                self.toast_manager.error("Cannot open day vote window")
         
     def setup_ui(self):
         """Thiết lập giao diện người dùng"""
@@ -140,6 +166,47 @@ class DayChatWindow(QtWidgets.QWidget):
         subtitle.setAlignment(QtCore.Qt.AlignCenter)
         subtitle.setStyleSheet("font-size: 14px; color: #cccccc; margin-bottom: 10px;")
         main_layout.addWidget(subtitle)
+
+        # Shared day-phase countdown (updated by RoomWindow)
+        self.timer_label = QtWidgets.QLabel("⏱️ --s")
+        self.timer_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.timer_label.setStyleSheet("""
+            font-size: 18px;
+            color: #f39c12;
+            font-weight: bold;
+            background-color: rgba(243, 156, 18, 0.1);
+            padding: 8px;
+            border-radius: 5px;
+            margin-bottom: 6px;
+        """)
+        main_layout.addWidget(self.timer_label)
+
+        # Vote navigation button
+        self.vote_btn = QtWidgets.QPushButton("🗳️ Vote")
+        self.vote_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f39c12;
+                color: black;
+                border: none;
+                border-radius: 8px;
+                font-weight: bold;
+                font-size: 14px;
+                padding: 10px 18px;
+            }
+            QPushButton:hover {
+                background-color: #ffb84d;
+            }
+            QPushButton:pressed {
+                background-color: #d68910;
+            }
+        """)
+        self.vote_btn.clicked.connect(self.on_go_to_vote)
+
+        vote_row = QtWidgets.QHBoxLayout()
+        vote_row.addStretch()
+        vote_row.addWidget(self.vote_btn)
+        vote_row.addStretch()
+        main_layout.addLayout(vote_row)
         
         # Chat area
         chat_group = QtWidgets.QGroupBox("Chat")

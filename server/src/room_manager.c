@@ -11,6 +11,54 @@
 
 Room rooms[MAX_ROOMS];
 
+void delete_room(int room_index) {
+    if (room_index < 0 || room_index >= MAX_ROOMS) return;
+
+    // Clear players
+    for (int i = 0; i < MAX_PLAYERS_PER_ROOM; i++) {
+        rooms[room_index].players[i].socket = 0;
+        rooms[room_index].players[i].user_id = 0;
+        rooms[room_index].players[i].username[0] = '\0';
+        rooms[room_index].players[i].role = 0;
+        rooms[room_index].players[i].is_alive = 0;
+        rooms[room_index].wolf_votes[i][0] = '\0';
+    }
+
+    rooms[room_index].id = 0;
+    rooms[room_index].name[0] = '\0';
+    rooms[room_index].current_players = 0;
+    rooms[room_index].status = ROOM_WAITING;
+    rooms[room_index].host_socket = 0;
+
+    // Reset night-phase state
+    rooms[room_index].night_phase_active = 0;
+    rooms[room_index].seer_deadline = 0;
+    rooms[room_index].guard_deadline = 0;
+    rooms[room_index].wolf_deadline = 0;
+    rooms[room_index].seer_choice_made = 0;
+    rooms[room_index].seer_chosen_target[0] = '\0';
+    rooms[room_index].guard_choice_made = 0;
+    rooms[room_index].guard_protected_username[0] = '\0';
+    rooms[room_index].wolf_vote_count = 0;
+    rooms[room_index].wolf_kill_done = 0;
+
+    // Reset role-card phase
+    rooms[room_index].role_card_done_count = 0;
+    rooms[room_index].role_card_total = 0;
+    rooms[room_index].role_card_start_time = 0;
+
+    // Reset day-phase state
+    rooms[room_index].day_phase_active = 0;
+    rooms[room_index].day_round = 0;
+    rooms[room_index].day_deadline = 0;
+    rooms[room_index].day_candidate_count = 0;
+    for (int i = 0; i < MAX_PLAYERS_PER_ROOM; i++) {
+        rooms[room_index].day_votes[i][0] = '\0';
+        rooms[room_index].day_vote_responded[i] = 0;
+        rooms[room_index].day_candidate_indices[i] = -1;
+    }
+}
+
 void init_rooms() {
     for (int i = 0; i < MAX_ROOMS; i++) {
         rooms[i].id = 0;
@@ -25,6 +73,285 @@ void init_rooms() {
         rooms[i].role_card_done_count = 0;
         rooms[i].role_card_total = 0;
         rooms[i].role_card_start_time = 0;
+
+        rooms[i].day_phase_active = 0;
+        rooms[i].day_round = 0;
+        rooms[i].day_deadline = 0;
+        rooms[i].day_candidate_count = 0;
+        for (int j = 0; j < MAX_PLAYERS_PER_ROOM; j++) {
+            rooms[i].day_votes[j][0] = '\0';
+            rooms[i].day_vote_responded[j] = 0;
+            rooms[i].day_candidate_indices[j] = -1;
+        }
+    }
+}
+
+static int is_candidate_in_round2(Room *room, int player_index) {
+    if (!room || room->day_round != 2) return 1;
+    for (int i = 0; i < room->day_candidate_count; i++) {
+        if (room->day_candidate_indices[i] == player_index) return 1;
+    }
+    return 0;
+}
+
+static void broadcast_game_over_with_reveal(int room_index, const char *winner_team) {
+    cJSON *obj = cJSON_CreateObject();
+    cJSON_AddStringToObject(obj, "type", "game_over");
+    cJSON_AddStringToObject(obj, "winner", winner_team);
+
+    cJSON *players = cJSON_CreateArray();
+    for (int i = 0; i < rooms[room_index].current_players; i++) {
+        if (rooms[room_index].players[i].username[0] == '\0') continue;
+        cJSON *p = cJSON_CreateObject();
+        cJSON_AddStringToObject(p, "username", rooms[room_index].players[i].username);
+        cJSON_AddNumberToObject(p, "role", rooms[room_index].players[i].role);
+        cJSON_AddNumberToObject(p, "is_alive", rooms[room_index].players[i].is_alive);
+        cJSON_AddItemToArray(players, p);
+    }
+    cJSON_AddItemToObject(obj, "players", players);
+
+    char *s = cJSON_PrintUnformatted(obj);
+    broadcast_room(room_index, GAME_OVER, s);
+    free(s);
+    cJSON_Delete(obj);
+}
+
+void start_day_phase(int room_index) {
+    if (room_index < 0 || room_index >= MAX_ROOMS) return;
+    if (rooms[room_index].id == 0) return;
+    if (rooms[room_index].status != ROOM_PLAYING) return;
+
+    time_t now = time(NULL);
+    rooms[room_index].day_phase_active = 1;
+    rooms[room_index].day_round = 1;
+    rooms[room_index].day_deadline = now + DAY_PHASE_DURATION;
+    rooms[room_index].day_candidate_count = 0;
+    for (int i = 0; i < rooms[room_index].current_players; i++) {
+        rooms[room_index].day_votes[i][0] = '\0';
+        rooms[room_index].day_vote_responded[i] = 0;
+    }
+}
+
+static int _alive_voter_count(int room_index) {
+    int n = rooms[room_index].current_players;
+    int alive = 0;
+    for (int i = 0; i < n; i++) {
+        if (rooms[room_index].players[i].username[0] == '\0') continue;
+        if (rooms[room_index].players[i].is_alive) alive++;
+    }
+    return alive;
+}
+
+static int _responded_alive_count(int room_index) {
+    int n = rooms[room_index].current_players;
+    int responded = 0;
+    for (int i = 0; i < n; i++) {
+        if (rooms[room_index].players[i].username[0] == '\0') continue;
+        if (!rooms[room_index].players[i].is_alive) continue;
+        if (rooms[room_index].day_vote_responded[i]) responded++;
+    }
+    return responded;
+}
+
+static void execute_player(int room_index, int target_index) {
+    if (room_index < 0 || room_index >= MAX_ROOMS) return;
+    if (target_index < 0 || target_index >= rooms[room_index].current_players) return;
+
+    rooms[room_index].players[target_index].is_alive = 0;
+
+    cJSON *ev = cJSON_CreateObject();
+    cJSON_AddStringToObject(ev, "type", "player_executed");
+    cJSON_AddStringToObject(ev, "playerId", rooms[room_index].players[target_index].username);
+    char *s = cJSON_PrintUnformatted(ev);
+    broadcast_room(room_index, VOTE_RESULT, s);
+    free(s);
+    cJSON_Delete(ev);
+}
+
+static int check_win_and_maybe_end(int room_index) {
+    int wolves_alive = 0;
+    int others_alive = 0;
+
+    for (int i = 0; i < rooms[room_index].current_players; i++) {
+        if (rooms[room_index].players[i].username[0] == '\0') continue;
+        if (!rooms[room_index].players[i].is_alive) continue;
+        if (rooms[room_index].players[i].role == ROLE_WEREWOLF) wolves_alive++;
+        else others_alive++;
+    }
+
+    if (wolves_alive == 0) {
+        rooms[room_index].status = ROOM_FINISHED;
+        rooms[room_index].day_phase_active = 0;
+        rooms[room_index].night_phase_active = 0;
+        broadcast_game_over_with_reveal(room_index, "villagers");
+        // After announcing final result, delete the room.
+        delete_room(room_index);
+        return 1;
+    }
+
+    if (wolves_alive > others_alive) {
+        rooms[room_index].status = ROOM_FINISHED;
+        rooms[room_index].day_phase_active = 0;
+        rooms[room_index].night_phase_active = 0;
+        broadcast_game_over_with_reveal(room_index, "werewolves");
+        // After announcing final result, delete the room.
+        delete_room(room_index);
+        return 1;
+    }
+
+    return 0;
+}
+
+static void start_tie_break_round2(int room_index, int *candidates, int candidate_count) {
+    time_t now = time(NULL);
+    rooms[room_index].day_round = 2;
+    rooms[room_index].day_deadline = now + DAY_TIE_BREAK_DURATION;
+    rooms[room_index].day_candidate_count = candidate_count;
+    for (int i = 0; i < candidate_count; i++) {
+        rooms[room_index].day_candidate_indices[i] = candidates[i];
+    }
+    for (int i = 0; i < rooms[room_index].current_players; i++) {
+        rooms[room_index].day_votes[i][0] = '\0';
+        rooms[room_index].day_vote_responded[i] = 0;
+    }
+
+    cJSON *ev = cJSON_CreateObject();
+    cJSON_AddStringToObject(ev, "type", "tie_break_start");
+    cJSON *arr = cJSON_CreateArray();
+    for (int i = 0; i < candidate_count; i++) {
+        int idx = candidates[i];
+        if (idx >= 0 && idx < rooms[room_index].current_players) {
+            cJSON_AddItemToArray(arr, cJSON_CreateString(rooms[room_index].players[idx].username));
+        }
+    }
+    cJSON_AddItemToObject(ev, "candidates", arr);
+    cJSON_AddNumberToObject(ev, "timer", DAY_TIE_BREAK_DURATION);
+    cJSON_AddNumberToObject(ev, "deadline", (double)rooms[room_index].day_deadline);
+    char *s = cJSON_PrintUnformatted(ev);
+    broadcast_room(room_index, VOTE_RESULT, s);
+    free(s);
+    cJSON_Delete(ev);
+}
+
+static void finalize_day_votes(int room_index) {
+    int n = rooms[room_index].current_players;
+    int tally[MAX_PLAYERS_PER_ROOM] = {0};
+
+    for (int i = 0; i < n; i++) {
+        if (rooms[room_index].players[i].username[0] == '\0') continue;
+        if (!rooms[room_index].players[i].is_alive) continue; // dead can't vote
+        if (rooms[room_index].day_votes[i][0] == '\0') continue; // AFK/null vote
+
+        // Find target index
+        for (int j = 0; j < n; j++) {
+            if (rooms[room_index].players[j].username[0] == '\0') continue;
+            if (!rooms[room_index].players[j].is_alive) continue;
+            if (!is_candidate_in_round2(&rooms[room_index], j)) continue;
+            if (strcmp(rooms[room_index].players[j].username, rooms[room_index].day_votes[i]) == 0) {
+                tally[j]++;
+                break;
+            }
+        }
+    }
+
+    int max_votes = 0;
+    int candidates[MAX_PLAYERS_PER_ROOM];
+    int candidate_count = 0;
+
+    for (int i = 0; i < n; i++) {
+        if (tally[i] > max_votes) {
+            max_votes = tally[i];
+            candidate_count = 0;
+            candidates[candidate_count++] = i;
+        } else if (tally[i] == max_votes && max_votes > 0) {
+            candidates[candidate_count++] = i;
+        }
+    }
+
+    // No votes => no execution, proceed to night
+    if (max_votes == 0 || candidate_count == 0) {
+        rooms[room_index].day_phase_active = 0;
+        rooms[room_index].day_round = 0;
+        rooms[room_index].day_candidate_count = 0;
+        start_night_phase(room_index, 0);
+        return;
+    }
+
+    if (candidate_count == 1) {
+        execute_player(room_index, candidates[0]);
+        rooms[room_index].day_phase_active = 0;
+        rooms[room_index].day_round = 0;
+        rooms[room_index].day_candidate_count = 0;
+
+        if (!check_win_and_maybe_end(room_index)) {
+            start_night_phase(room_index, 0);
+        }
+        return;
+    }
+
+    if (rooms[room_index].day_round == 1) {
+        start_tie_break_round2(room_index, candidates, candidate_count);
+        return;
+    }
+
+    // Round 2 tie => random select among tied candidates
+    srand((unsigned int)time(NULL) + room_index);
+    int selected_index = candidates[rand() % candidate_count];
+
+    cJSON *ev = cJSON_CreateObject();
+    cJSON_AddStringToObject(ev, "type", "execution_random_selected");
+    cJSON *arr = cJSON_CreateArray();
+    for (int i = 0; i < candidate_count; i++) {
+        int idx = candidates[i];
+        cJSON_AddItemToArray(arr, cJSON_CreateString(rooms[room_index].players[idx].username));
+    }
+    cJSON_AddItemToObject(ev, "candidates", arr);
+    cJSON_AddStringToObject(ev, "selected", rooms[room_index].players[selected_index].username);
+    cJSON_AddStringToObject(ev, "reason", "tie_break_still_equal");
+    char *s = cJSON_PrintUnformatted(ev);
+    broadcast_room(room_index, VOTE_RESULT, s);
+    free(s);
+    cJSON_Delete(ev);
+
+    execute_player(room_index, selected_index);
+    rooms[room_index].day_phase_active = 0;
+    rooms[room_index].day_round = 0;
+    rooms[room_index].day_candidate_count = 0;
+
+    if (!check_win_and_maybe_end(room_index)) {
+        start_night_phase(room_index, 0);
+    }
+}
+
+void maybe_finalize_day_votes_early(int room_index) {
+    if (room_index < 0 || room_index >= MAX_ROOMS) return;
+    if (rooms[room_index].id == 0) return;
+    if (rooms[room_index].status != ROOM_PLAYING) return;
+    if (!rooms[room_index].day_phase_active) return;
+
+    int alive = _alive_voter_count(room_index);
+    if (alive <= 0) return;
+
+    int responded = _responded_alive_count(room_index);
+    if (responded >= alive) {
+        printf("[SERVER] All alive players responded in room %d (round %d). Finalizing votes early.\n",
+               rooms[room_index].id, rooms[room_index].day_round);
+        finalize_day_votes(room_index);
+    }
+}
+
+void check_day_phase_timeout() {
+    time_t now = time(NULL);
+    for (int i = 0; i < MAX_ROOMS; i++) {
+        if (rooms[i].id == 0) continue;
+        if (rooms[i].status != ROOM_PLAYING) continue;
+        if (!rooms[i].day_phase_active) continue;
+        if (rooms[i].day_deadline == 0) continue;
+
+        if (now >= rooms[i].day_deadline) {
+            printf("[SERVER] Day phase timeout in room %d (round %d). Finalizing votes.\n", rooms[i].id, rooms[i].day_round);
+            finalize_day_votes(i);
+        }
     }
 }
 
@@ -73,6 +400,7 @@ void start_night_phase(int room_index, int duration_seconds) {
     rooms[room_index].wolf_kill_done = 0;
     for (int i = 0; i < rooms[room_index].current_players; i++) {
         rooms[room_index].wolf_votes[i][0] = '\0';
+        rooms[room_index].wolf_vote_responded[i] = 0;
     }
 
     cJSON *notif = cJSON_CreateObject();
@@ -130,12 +458,26 @@ void broadcast_room(int room_index, int header, const char *payload) {
 
 void cleanup_empty_rooms() {
     for (int i = 0; i < MAX_ROOMS; i++) {
-        if (rooms[i].id != 0 && rooms[i].current_players == 0) {
+        if (rooms[i].id == 0) continue;
+
+        // Legacy cleanup: no players
+        if (rooms[i].current_players == 0) {
             printf("Cleaning up empty room %d ('%s')\n", rooms[i].id, rooms[i].name);
-            rooms[i].id = 0;
-            rooms[i].name[0] = '\0';
-            rooms[i].status = ROOM_WAITING;
-            rooms[i].host_socket = 0;
+            delete_room(i);
+            continue;
+        }
+
+        // New cleanup: game running but everyone is dead/disconnected.
+        if (rooms[i].status == ROOM_PLAYING) {
+            int alive_count = 0;
+            for (int j = 0; j < rooms[i].current_players; j++) {
+                if (rooms[i].players[j].username[0] == '\0') continue;
+                if (rooms[i].players[j].is_alive) alive_count++;
+            }
+            if (alive_count == 0) {
+                printf("Cleaning up dead room %d ('%s') - all players are dead/disconnected\n", rooms[i].id, rooms[i].name);
+                delete_room(i);
+            }
         }
     }
 }
@@ -330,6 +672,9 @@ void check_wolf_phase_timeout() {
             
                 // Kết thúc night phase
             rooms[i].night_phase_active = 0;
+
+                // Start day phase voting/discussion (round 1)
+                start_day_phase(i);
             
                 // Gửi compact result thay vì large dead_players array
                 cJSON *result_obj = cJSON_CreateObject();
@@ -338,6 +683,8 @@ void check_wolf_phase_timeout() {
                 if (target_id != NULL && strcmp(result, "killed") == 0) {
                     cJSON_AddStringToObject(result_obj, "targetId", target_id);
                 }
+                cJSON_AddNumberToObject(result_obj, "day_duration", DAY_PHASE_DURATION);
+                cJSON_AddNumberToObject(result_obj, "day_deadline", (double)rooms[i].day_deadline);
                 char *result_str = cJSON_PrintUnformatted(result_obj);
                 printf("[SERVER] Wolf phase timeout in room %d, broadcasting compact PHASE_DAY (304): result=%s%s%s\n", 
                        rooms[i].id, result,

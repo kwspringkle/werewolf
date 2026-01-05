@@ -232,6 +232,7 @@ int main() {
             check_seer_phase_timeout();  // Check seer deadline
             check_guard_phase_timeout(); // Check guard deadline
             check_wolf_phase_timeout();  // Check wolf deadline and process votes
+            check_day_phase_timeout();   // Check day deadline and process votes
             last_check = now;
         }
 

@@ -21,6 +21,10 @@ typedef struct Room Room;
 #define WOLF_PHASE_DURATION 60
 #define TOTAL_NIGHT_PHASE_DURATION (SEER_PHASE_DURATION + GUARD_PHASE_DURATION + WOLF_PHASE_DURATION)
 
+// Day voting durations
+#define DAY_PHASE_DURATION 120
+#define DAY_TIE_BREAK_DURATION 30
+
 // Session structure
 struct Session {
     int socket;
@@ -59,10 +63,20 @@ struct Room {
     char wolf_votes[MAX_PLAYERS_PER_ROOM][50]; // username bị mỗi sói chọn ("" nếu chưa vote)
     int wolf_vote_count; // số lượng sói đã vote đêm nay
     int wolf_kill_done; // 1 nếu đã tổng hợp và xử lý kill đêm nay
+        int wolf_vote_responded[MAX_PLAYERS_PER_ROOM]; // 1 if wolf has responded this round (vote or skip)
     /* Role card reading phase */
     int role_card_done_count; // số người đã đọc xong role card
     int role_card_total; // tổng số người chơi
     time_t role_card_start_time; // thời gian bắt đầu đọc role card (để timeout sau 30s)
+
+    /* Day-phase voting state */
+    int day_phase_active; // 1 if day voting/discussion is active
+    int day_round;        // 1 or 2
+    time_t day_deadline;  // epoch seconds when current day round ends
+    char day_votes[MAX_PLAYERS_PER_ROOM][50]; // vote target username per voter ("" if none)
+    int day_vote_responded[MAX_PLAYERS_PER_ROOM]; // 1 if voter has responded this round (vote or skip)
+    int day_candidate_indices[MAX_PLAYERS_PER_ROOM];
+    int day_candidate_count;
 };
 
 // Room status enum
