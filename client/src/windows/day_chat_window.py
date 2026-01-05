@@ -316,7 +316,7 @@ class DayChatWindow(QtWidgets.QWidget):
         """Gửi tin nhắn chat"""
         if not self.can_send_chat:
             if self.toast_manager:
-                self.toast_manager.warning("Bạn đã chết, không thể gửi tin nhắn")
+                self.toast_manager.warning("You are dead. Cannot send message!")
             return
         msg = self.input_box.text().strip()
 

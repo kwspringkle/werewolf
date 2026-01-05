@@ -78,12 +78,12 @@ class DayVoteWindow(QtWidgets.QWidget):
                         self.my_is_alive = True
                     break
         
-        # Rebuild player cards
-        self.rebuild_player_cards()
-        
         # Reset vote state - IMPORTANT: reset on every showEvent to allow voting in day 2, 3, etc.
         self.selected_username = None
         self.has_voted = False
+
+        # Rebuild player cards
+        self.rebuild_player_cards()
         # Re-enable buttons if alive
         if self.my_is_alive:
             self.submit_btn.setEnabled(False)  # Will be enabled when player selected
@@ -154,7 +154,7 @@ class DayVoteWindow(QtWidgets.QWidget):
         self.card_layout.addWidget(self.timer_label)
 
         # Hint for dead voters
-        self.dead_hint_label = QtWidgets.QLabel("Bạn đã chết nên không thể vote")
+        self.dead_hint_label = QtWidgets.QLabel("You are dead. Cannot vote.")
         self.dead_hint_label.setAlignment(QtCore.Qt.AlignCenter)
         self.dead_hint_label.setVisible(False)
         self.dead_hint_label.setStyleSheet("""
@@ -293,6 +293,15 @@ class DayVoteWindow(QtWidgets.QWidget):
 
         # Get players from shared data
         players = self.window_manager.get_shared_data("room_players", [])
+
+        # If server started a tie-break round, only allow voting among candidates.
+        candidates = self.window_manager.get_shared_data("day_vote_candidates")
+        candidate_set = None
+        if isinstance(candidates, list) and candidates:
+            try:
+                candidate_set = {str(x) for x in candidates if x}
+            except Exception:
+                candidate_set = None
         
         if not players:
             print("[DEBUG] No players found in shared data")
@@ -308,6 +317,9 @@ class DayVoteWindow(QtWidgets.QWidget):
                 continue
             
             username = player.get("username", "Unknown")
+
+            if candidate_set is not None and username not in candidate_set:
+                continue
             try:
                 is_alive = int(player.get("is_alive", 1)) != 0
             except Exception:
@@ -477,7 +489,7 @@ class DayVoteWindow(QtWidgets.QWidget):
         
         if not self.my_is_alive:
             if self.toast_manager:
-                self.toast_manager.warning("Bạn đã chết nên không thể vote")
+                self.toast_manager.warning("You are dead. Cannot vote.")
             return
 
         # Send empty vote to server as skip

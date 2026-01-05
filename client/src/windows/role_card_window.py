@@ -13,6 +13,7 @@ class RoleCardWindow(QtWidgets.QWidget):
         self.total_time = 30
         self.remaining_time = 30
         self.deadline = None  # epoch seconds
+        self._sent_done = False
         self.network_client = None
         self.room_id = None
         self.setObjectName("role_card_window")
@@ -22,6 +23,8 @@ class RoleCardWindow(QtWidgets.QWidget):
     def showEvent(self, event):
         """Called when window is shown"""
         super().showEvent(event)
+        # If user re-opens role card in the same game, allow sending again.
+        self._sent_done = False
         # Lấy network client từ shared data
         self.network_client = self.window_manager.get_shared_data("network_client")
         self.room_id = self.window_manager.get_shared_data("current_room_id")
@@ -170,9 +173,21 @@ class RoleCardWindow(QtWidgets.QWidget):
             self.countdown_timer.stop()
         # Ready: gửi ROLE_CARD_DONE_REQ và chuyển sang night_begin để chờ mọi người
         self.send_timeout_and_wait()
+
+    def hideEvent(self, event):
+        """Stop timers when window is hidden (e.g., server forces phase transition)."""
+        super().hideEvent(event)
+        try:
+            if hasattr(self, 'countdown_timer') and self.countdown_timer:
+                self.countdown_timer.stop()
+        except Exception:
+            pass
         
     def send_timeout_and_wait(self):
         """Gửi ROLE_CARD_DONE_REQ và chuyển sang night_begin (countdown đồng bộ theo deadline)."""
+        if self._sent_done:
+            return
+        self._sent_done = True
         print("[DEBUG] Role card done: sending ROLE_CARD_DONE_REQ and showing night_begin")
 
         # Persist night_begin countdown based on the same deadline

@@ -940,8 +940,19 @@ class RoomWindow(QtWidgets.QWidget):
                     self._start_day_timer(float(deadline))
 
                 vote_win = self.window_manager.windows.get("day_vote")
-                if vote_win and hasattr(vote_win, "rebuild_player_cards"):
-                    vote_win.rebuild_player_cards()
+                if vote_win:
+                    # Allow revote in tie-break round
+                    try:
+                        vote_win.selected_username = None
+                        vote_win.has_voted = False
+                        if hasattr(vote_win, "submit_btn"):
+                            vote_win.submit_btn.setEnabled(False)
+                        if hasattr(vote_win, "skip_btn"):
+                            vote_win.skip_btn.setEnabled(True)
+                    except Exception:
+                        pass
+                    if hasattr(vote_win, "rebuild_player_cards"):
+                        vote_win.rebuild_player_cards()
             except Exception as e:
                 print(f"[WARNING] Failed to apply tie_break_start: {e}")
             return

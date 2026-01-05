@@ -87,7 +87,7 @@ class GuardSelectWindow(QtWidgets.QWidget):
         title_label.setStyleSheet("font-size: 22px; color: #43d9ad; font-weight: bold;")
         self.card_layout.addWidget(title_label)
 
-        self.dead_hint_label = QtWidgets.QLabel("Bạn đã chết nên không thể chọn ai. Bạn vẫn có thể bấm Skip.")
+        self.dead_hint_label = QtWidgets.QLabel("You are dead. Cannot select anyone. You can still press Skip.")
         self.dead_hint_label.setAlignment(QtCore.Qt.AlignCenter)
         self.dead_hint_label.setVisible(not self.my_is_alive)
         self.dead_hint_label.setStyleSheet("""
@@ -323,7 +323,7 @@ class GuardSelectWindow(QtWidgets.QWidget):
     def on_select(self):
         if not self.my_is_alive:
             try:
-                QtWidgets.QMessageBox.information(self, "Info", "Bạn đã chết nên không thể chọn ai.")
+                QtWidgets.QMessageBox.information(self, "Info", "You are dead. Cannot select anyone.")
             except Exception:
                 pass
             return

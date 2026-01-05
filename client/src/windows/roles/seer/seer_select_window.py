@@ -94,7 +94,7 @@ class SeerSelectWindow(QtWidgets.QWidget):
         hint_label.setStyleSheet("font-size: 12px; color: #cccccc; margin-top: 2px;")
         self.card_layout.addWidget(hint_label)
 
-        self.dead_hint_label = QtWidgets.QLabel("Bạn đã chết nên không thể chọn ai. Bạn vẫn có thể bấm Skip.")
+        self.dead_hint_label = QtWidgets.QLabel("You are dead. Cannot select anyone. You can still press Skip.")
         self.dead_hint_label.setAlignment(QtCore.Qt.AlignCenter)
         self.dead_hint_label.setVisible(not self.my_is_alive)
         self.dead_hint_label.setStyleSheet("""
@@ -319,7 +319,7 @@ class SeerSelectWindow(QtWidgets.QWidget):
     def on_select(self):
         if not self.my_is_alive:
             try:
-                QtWidgets.QMessageBox.information(self, "Info", "Bạn đã chết nên không thể chọn ai.")
+                QtWidgets.QMessageBox.information(self, "Info", "You are dead. Cannot select anyone.")
             except Exception:
                 pass
             return
