@@ -354,7 +354,9 @@ class LoginWindow(QtWidgets.QWidget):
 
             if role_card_active and not night_phase_active:
                 # Players are still reading role cards; spectator just waits.
-                self.window_manager.navigate_to("night_begin")
+                # DON'T show night_begin - wait for server PHASE_NIGHT
+                # Navigate to role_card instead
+                self.window_manager.navigate_to("role_card")
             elif night_phase_active:
                 # Resume into the correct sub-phase screen like others.
                 import time

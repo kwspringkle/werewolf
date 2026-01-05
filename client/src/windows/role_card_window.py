@@ -41,6 +41,9 @@ class RoleCardWindow(QtWidgets.QWidget):
         if shared_deadline is None and self.role_data:
             shared_deadline = time.time() + float(self.total_time)
             self.window_manager.set_shared_data("role_card_deadline", shared_deadline)
+            # Đồng bộ deadline với night_begin để countdown giống nhau
+            self.window_manager.set_shared_data("night_begin_deadline", shared_deadline)
+            self.window_manager.set_shared_data("night_begin_remaining_time", self.total_time)
 
         self.deadline = shared_deadline
         if self.deadline is not None:
@@ -59,6 +62,9 @@ class RoleCardWindow(QtWidgets.QWidget):
             # If deadline not yet set, start it now
             self.deadline = time.time() + float(self.total_time)
             self.window_manager.set_shared_data("role_card_deadline", self.deadline)
+            # Đồng bộ deadline với night_begin để countdown giống nhau
+            self.window_manager.set_shared_data("night_begin_deadline", self.deadline)
+            self.window_manager.set_shared_data("night_begin_remaining_time", self.total_time)
         
         # Update UI với role data mới
         self.update_ui()
@@ -185,9 +191,13 @@ class RoleCardWindow(QtWidgets.QWidget):
             except Exception as e:
                 print(f"[ERROR] Failed to notify server ROLE_CARD_DONE_REQ: {e}")
 
-        # Navigate immediately to night_begin while waiting for PHASE_NIGHT
+        # Navigate to night_begin ngay khi ready (đồng hồ đã đồng bộ từ deadline)
         if self.window_manager:
-            self.window_manager.navigate_to("night_begin")
+            # Navigate to night_begin với countdown đã được set từ deadline
+            if "night_begin" in self.window_manager.windows:
+                self.window_manager.navigate_to("night_begin")
+            else:
+                print("[WARNING] night_begin window not registered yet")
             
     def closeEvent(self, event):
         """Stop timer when closing"""

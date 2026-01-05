@@ -27,5 +27,7 @@ void check_guard_phase_timeout();
 void check_wolf_phase_timeout();
 // Check day phase timeout, process votes, execute, and proceed to night or game over
 void check_day_phase_timeout();
+// Check win condition and end game if needed (returns 1 if game ended, 0 otherwise)
+int check_win_and_maybe_end(int room_index);
 
 #endif

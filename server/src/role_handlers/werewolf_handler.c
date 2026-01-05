@@ -243,6 +243,19 @@ void werewolf_handle_packet(int client_fd, cJSON *json) {
         // Kết thúc night phase
         rooms[room_index].night_phase_active = 0;
 
+        // Kiểm tra điều kiện thắng TRƯỚC KHI start day phase
+        // (sau khi đã xử lý kill, nếu có người chết)
+        if (strcmp(result, "killed") == 0 && target_id != NULL) {
+            // Có người chết, kiểm tra win condition
+            // Declare function from room_manager.c
+            extern int check_win_and_maybe_end(int room_index);
+            if (check_win_and_maybe_end(room_index)) {
+                // Game đã kết thúc, không start day phase
+                printf("[SERVER] Game ended after night kill, not starting day phase\n");
+                return;
+            }
+        }
+
         // Start day phase voting/discussion (round 1)
         start_day_phase(room_index);
         

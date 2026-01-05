@@ -12,7 +12,7 @@ from .roles.wolf.wolf_wait_window import WolfWaitWindow
 
 class NightPhaseController:
     """Điều phối night phase: seer -> guard -> wolf (role-based windows)"""
-    def __init__(self, window_manager, network_client, players, my_username, room_id, is_seer, is_guard, is_wolf, wolf_usernames, seer_duration=30, guard_duration=30, wolf_duration=30):
+    def __init__(self, window_manager, network_client, players, my_username, room_id, is_seer, is_guard, is_wolf, wolf_usernames, seer_duration=30, guard_duration=30, wolf_duration=30, toast_manager=None):
         self.window_manager = window_manager
         self.network_client = network_client
         self.players = players
@@ -25,6 +25,7 @@ class NightPhaseController:
         self.seer_duration = seer_duration
         self.guard_duration = guard_duration
         self.wolf_duration = wolf_duration
+        self.toast_manager = toast_manager
         self.seer_window = None
         self.seer_result_window = None
         self.guard_window = None
@@ -54,6 +55,8 @@ class NightPhaseController:
                     self.seer_duration,
                     self.network_client,
                     self.room_id,
+                    window_manager=self.window_manager,
+                    toast_manager=self.toast_manager
                 )
                 # Register + navigate (single-window flow)
                 self.window_manager.register_window("seer_select", self.seer_window)
@@ -71,7 +74,11 @@ class NightPhaseController:
         else:
             print("[DEBUG] User is not seer - creating and showing SeerWaitWindow")
             try:
-                self.seer_window = SeerWaitWindow(self.seer_duration)
+                self.seer_window = SeerWaitWindow(
+                    self.seer_duration,
+                    window_manager=self.window_manager,
+                    toast_manager=self.toast_manager
+                )
                 self.window_manager.register_window("seer_wait", self.seer_window)
                 self.window_manager.navigate_to("seer_wait")
                 print("[DEBUG] SeerWaitWindow navigated successfully")
@@ -151,14 +158,27 @@ class NightPhaseController:
             print(f"[DEBUG] Guard select - total players: {len(self.players)}")
             print(f"[DEBUG] Guard select - full players data: {self.players}")
             # Đảm bảo truyền TẤT CẢ players vào GuardSelectWindow, không filter
-            self.guard_window = GuardSelectWindow(self.players, self.my_username, self.guard_duration, self.network_client, self.room_id)
+            # Truyền window_manager và toast_manager để có thể lấy username và hiển thị thông báo
+            self.guard_window = GuardSelectWindow(
+                self.players, 
+                self.my_username, 
+                self.guard_duration, 
+                self.network_client, 
+                self.room_id,
+                window_manager=self.window_manager,
+                toast_manager=self.toast_manager
+            )
             self.window_manager.register_window("guard_select", self.guard_window)
             self.window_manager.navigate_to("guard_select")
             # Guard window sẽ tự đóng khi guard chọn xong, nhưng không tự động chuyển sang wolf
             # Đợi server broadcast PHASE_WOLF_START (không connect destroyed signal)
         else:
             print("[DEBUG] User is not guard - showing GuardWaitWindow")
-            self.guard_window = GuardWaitWindow(self.guard_duration)
+            self.guard_window = GuardWaitWindow(
+                self.guard_duration,
+                window_manager=self.window_manager,
+                toast_manager=self.toast_manager
+            )
             self.window_manager.register_window("guard_wait", self.guard_window)
             self.window_manager.navigate_to("guard_wait")
             # Do NOT auto-advance locally; wait for server PHASE_WOLF_START.

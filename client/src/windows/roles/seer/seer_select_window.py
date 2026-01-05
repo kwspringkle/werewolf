@@ -29,6 +29,16 @@ class SeerSelectWindow(QtWidgets.QWidget):
         self.setWindowTitle("Seer — Pick a player")
         self.setup_ui()
         self.start_timer()
+    
+    def showEvent(self, event):
+        """Called when window is shown - update username from shared_data"""
+        super().showEvent(event)
+        # Update username from shared_data to ensure it's current
+        if self.window_manager:
+            username = self.window_manager.get_shared_data("username")
+            if username and hasattr(self, 'user_header'):
+                self.user_header.set_username(username)
+                self.my_username = username
 
     def setup_ui(self):
         main_layout = QtWidgets.QVBoxLayout(self)
@@ -177,12 +187,13 @@ class SeerSelectWindow(QtWidgets.QWidget):
                 card_item.setEnabled(False)
                 name_label.setText(uname + "\n(You — already know)")
 
-            # Clickable only if: seer is alive AND target is alive AND not self
+            # If seer is dead: show cards but disable selection (only allow skip)
+            # If seer is alive: allow selection of alive players (not self)
             if self.my_is_alive and is_alive and (not is_self):
                 card_item.mousePressEvent = self._make_card_click(card_item, uname)
                 card_item.setCursor(QtCore.Qt.PointingHandCursor)
             else:
-                # Dead player: không thể click, cursor mặc định
+                # Dead seer or dead target or self: không thể click, cursor mặc định
                 card_item.setCursor(QtCore.Qt.ForbiddenCursor)
                 # Disable card để không thể tương tác
                 card_item.setEnabled(False)
