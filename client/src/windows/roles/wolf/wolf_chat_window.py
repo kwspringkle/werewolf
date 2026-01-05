@@ -112,7 +112,7 @@ class WolfChatWindow(QtWidgets.QWidget):
         card_layout.addWidget(self.messages_area, 1)
 
         # Hint for dead users
-        self.chat_hint_label = QtWidgets.QLabel("Bạn đã chết, bạn không thể gửi tin nhắn.")
+        self.chat_hint_label = QtWidgets.QLabel("You are dead. Cannot send message.")
         self.chat_hint_label.setAlignment(QtCore.Qt.AlignCenter)
         self.chat_hint_label.setVisible(False)
         self.chat_hint_label.setStyleSheet(
@@ -261,7 +261,7 @@ class WolfChatWindow(QtWidgets.QWidget):
     def send_message(self):
         if not self.can_send_chat:
             if self.toast_manager:
-                self.toast_manager.warning("Bạn đã chết, không thể gửi tin nhắn")
+                self.toast_manager.warning("You are dead. Cannot send message!")
             return
         msg = self.input_box.text().strip()
         if msg:
