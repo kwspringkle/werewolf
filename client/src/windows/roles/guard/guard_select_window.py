@@ -28,6 +28,16 @@ class GuardSelectWindow(QtWidgets.QWidget):
         self.setWindowTitle("Guard — Protect a player")
         self.setup_ui()
         self.start_timer()
+    
+    def showEvent(self, event):
+        """Called when window is shown - update username from shared_data"""
+        super().showEvent(event)
+        # Update username from shared_data to ensure it's current
+        if self.window_manager:
+            username = self.window_manager.get_shared_data("username")
+            if username and hasattr(self, 'user_header'):
+                self.user_header.set_username(username)
+                self.my_username = username
 
     def setup_ui(self):
         main_layout = QtWidgets.QVBoxLayout(self)
@@ -184,12 +194,13 @@ class GuardSelectWindow(QtWidgets.QWidget):
             name_label.setWordWrap(True)
             card_item_layout.addWidget(name_label)
 
-            # Clickable only if: guard is alive AND target is alive
+            # If guard is dead: show cards but disable selection (only allow skip)
+            # If guard is alive: allow selection of alive players
             if self.my_is_alive and is_alive:
                 card_item.mousePressEvent = self._make_card_click(card_item, uname, is_alive)
                 card_item.setCursor(QtCore.Qt.PointingHandCursor)
             else:
-                # Dead player: không thể click, cursor mặc định
+                # Dead guard or dead target: không thể click, cursor mặc định
                 card_item.setCursor(QtCore.Qt.ForbiddenCursor)
                 # Disable card để không thể tương tác
                 card_item.setEnabled(False)
@@ -234,7 +245,8 @@ class GuardSelectWindow(QtWidgets.QWidget):
         btn_layout.addWidget(self.skip_btn)
         self.select_btn = QtWidgets.QPushButton("Protect")
         self.select_btn.setMinimumHeight(35)
-        self.select_btn.setEnabled(False)  # Disabled cho đến khi player selected
+        # If guard is dead, disable select button (only allow skip)
+        self.select_btn.setEnabled(False if not self.my_is_alive else False)  # Disabled cho đến khi player selected
         self.select_btn.setStyleSheet("""
             QPushButton {
                 background-color: #43d9ad;

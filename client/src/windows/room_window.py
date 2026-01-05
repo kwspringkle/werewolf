@@ -624,7 +624,7 @@ class RoomWindow(QtWidgets.QWidget):
                 msg = payload.get("message", "Unknown error")
                 self.toast_manager.error(f"Failed to start game: {msg}")
         elif header == 303:  # PHASE_NIGHT
-            print("[DEBUG] Received PHASE_NIGHT from server, starting night phase")
+            print("[DEBUG] Received PHASE_NIGHT from server, showing night_begin first")
             # payload may contain duration và các phase duration riêng
             duration = payload.get("duration", 90)  # Total duration (seer + guard + wolf)
             seer_duration = payload.get("seer_duration", 30)
@@ -643,24 +643,32 @@ class RoomWindow(QtWidgets.QWidget):
             else:
                 print(f"[WARNING] No players list in PHASE_NIGHT packet, using existing room_players")
             
-            # Đóng tất cả các window có thể đang mở (role_card, night_begin)
-            # Đảm bảo đóng đúng cách để tránh window trắng
-            if "night_begin" in self.window_manager.windows:
-                night_begin_win = self.window_manager.windows["night_begin"]
-                if night_begin_win.isVisible():
-                    print(f"[DEBUG] Closing night_begin_window, starting night phase")
-                    night_begin_win.hide()
-                    if hasattr(night_begin_win, 'timer') and night_begin_win.timer:
-                        night_begin_win.timer.stop()
-            
+            # Đóng role_card window nếu đang mở
             if "role_card" in self.window_manager.windows:
                 role_card_win = self.window_manager.windows["role_card"]
                 if role_card_win.isVisible():
-                    print(f"[DEBUG] Closing role_card_window, starting night phase")
+                    print(f"[DEBUG] Closing role_card_window, showing night_begin")
                     role_card_win.hide()
             
-            # Bắt đầu night phase ngay (sẽ show seer select hoặc seer wait)
-            self.start_night_phase(duration, seer_duration, guard_duration, wolf_duration)
+            # Show night_begin window FIRST (only when PHASE_NIGHT is received)
+            # Set deadline for night_begin countdown (short 3 second display)
+            import time
+            night_begin_duration = 3  # Show night_begin for 3 seconds
+            night_begin_deadline = time.time() + night_begin_duration
+            self.window_manager.set_shared_data("night_begin_deadline", night_begin_deadline)
+            self.window_manager.set_shared_data("night_begin_remaining_time", night_begin_duration)
+            
+            # Store night phase info for later use
+            self.window_manager.set_shared_data("pending_night_phase", {
+                "duration": duration,
+                "seer_duration": seer_duration,
+                "guard_duration": guard_duration,
+                "wolf_duration": wolf_duration
+            })
+            
+            # Show night_begin window
+            if "night_begin" in self.window_manager.windows:
+                self.window_manager.navigate_to("night_begin")
 
         # NOTE: PING/PONG handled at the top of this function to avoid duplicate branches.
         elif header == 406:  # SEER_RESULT
@@ -701,10 +709,22 @@ class RoomWindow(QtWidgets.QWidget):
             # Get night phase controller from shared data
             night_ctrl = self.window_manager.get_shared_data("night_phase_controller")
             if night_ctrl:
-                # Không cần update players list - giữ nguyên từ khi start_night_phase
-                # players list đã được set đúng khi start_night_phase với đầy đủ thông tin
-                print(f"[DEBUG] Guard phase - using existing players list: {len(night_ctrl.players)} players")
-                print(f"[DEBUG] Players usernames: {[p.get('username', 'unknown') if isinstance(p, dict) else str(p) for p in night_ctrl.players]}")
+                # Update players list từ shared_data để đảm bảo có đầy đủ thông tin mới nhất
+                players_from_shared = self.window_manager.get_shared_data("room_players", [])
+                if players_from_shared:
+                    # Normalize players list format
+                    updated_players = []
+                    for p in players_from_shared:
+                        if isinstance(p, dict):
+                            updated_players.append({
+                                "username": p.get("username", ""),
+                                "is_alive": p.get("is_alive", 1),
+                                "role": p.get("role", None)
+                            })
+                    if updated_players:
+                        night_ctrl.players = updated_players
+                        print(f"[DEBUG] Guard phase - updated players list from shared_data: {len(updated_players)} players")
+                        print(f"[DEBUG] Players with roles: {[(p.get('username'), p.get('role'), p.get('is_alive')) for p in updated_players]}")
                 
                 # Update guard duration if needed
                 night_ctrl.guard_duration = guard_duration
@@ -722,10 +742,22 @@ class RoomWindow(QtWidgets.QWidget):
             # Get night phase controller from shared data
             night_ctrl = self.window_manager.get_shared_data("night_phase_controller")
             if night_ctrl:
-                # Không cần update players list - giữ nguyên từ khi start_night_phase
-                # players list đã được set đúng khi start_night_phase với đầy đủ thông tin
-                print(f"[DEBUG] Wolf phase - using existing players list: {len(night_ctrl.players)} players")
-                print(f"[DEBUG] Players usernames: {[p.get('username', 'unknown') if isinstance(p, dict) else str(p) for p in night_ctrl.players]}")
+                # Update players list từ shared_data để đảm bảo có đầy đủ thông tin mới nhất
+                players_from_shared = self.window_manager.get_shared_data("room_players", [])
+                if players_from_shared:
+                    # Normalize players list format
+                    updated_players = []
+                    for p in players_from_shared:
+                        if isinstance(p, dict):
+                            updated_players.append({
+                                "username": p.get("username", ""),
+                                "is_alive": p.get("is_alive", 1),
+                                "role": p.get("role", None)
+                            })
+                    if updated_players:
+                        night_ctrl.players = updated_players
+                        print(f"[DEBUG] Wolf phase - updated players list from shared_data: {len(updated_players)} players")
+                        print(f"[DEBUG] Players with roles: {[(p.get('username'), p.get('role'), p.get('is_alive')) for p in updated_players]}")
                 
                 # Re-check role info to ensure is_wolf is correct
                 role_info = self.window_manager.get_shared_data("role_info", {})
@@ -733,7 +765,7 @@ class RoomWindow(QtWidgets.QWidget):
                 is_wolf = (role_num == 1)
                 # Update is_wolf in night_ctrl to ensure correct detection
                 night_ctrl.is_wolf = is_wolf
-                # Also update wolf_usernames from role_info
+                # Also update wolf_usernames from role_info or players list
                 wolf_usernames = role_info.get("werewolf_team", [])
                 if not wolf_usernames:
                     # Fallback: check role in players list
@@ -836,6 +868,16 @@ class RoomWindow(QtWidgets.QWidget):
                     self.window_manager.set_shared_data("day_vote_candidates", None)
                     self.window_manager.set_shared_data("day_vote_selected_username", None)
                     self._start_day_timer(float(day_deadline))
+                
+                # Reset vote state in day_vote_window if it exists
+                vote_win = self.window_manager.windows.get("day_vote")
+                if vote_win and hasattr(vote_win, "has_voted"):
+                    vote_win.has_voted = False
+                    vote_win.selected_username = None
+                    if hasattr(vote_win, "skip_btn") and vote_win.my_is_alive:
+                        vote_win.skip_btn.setEnabled(True)
+                    if hasattr(vote_win, "submit_btn"):
+                        vote_win.submit_btn.setEnabled(False)
             except Exception as e:
                 print(f"[WARNING] Failed to init day timer from PHASE_DAY: {e}")
 
@@ -1041,16 +1083,16 @@ class RoomWindow(QtWidgets.QWidget):
             is_guard = False
             is_wolf = False
         
-        # Đảm bảo players có đầy đủ thông tin: username và is_alive
-        # Players list từ server đã có is_alive, chỉ cần normalize format
+        # Đảm bảo players có đầy đủ thông tin: username, is_alive, và role
+        # Players list từ server đã có is_alive và role, chỉ cần normalize format
         players = []
         for p in players_raw:
             if isinstance(p, dict):
-                # Đảm bảo có username và is_alive
+                # Đảm bảo có username, is_alive, và role
                 player_info = {
                     "username": p.get("username", ""),
                     "is_alive": p.get("is_alive", 1),  # Server gửi is_alive, mặc định 1 nếu không có
-                    "role": p.get("role", None)  # Giữ role nếu có
+                    "role": p.get("role", None)  # Server gửi role trong PHASE_NIGHT
                 }
             else:
                 # Nếu p là string (username) - fallback
@@ -1060,6 +1102,9 @@ class RoomWindow(QtWidgets.QWidget):
                     "role": None
                 }
             players.append(player_info)
+        
+        # Debug: Print players with roles
+        print(f"[DEBUG] start_night_phase - players with roles: {[(p.get('username'), p.get('role'), p.get('is_alive')) for p in players]}")
         
         # Debug: Print players list
         print(f"[DEBUG] start_night_phase - players count: {len(players)}")
@@ -1078,7 +1123,8 @@ class RoomWindow(QtWidgets.QWidget):
         night_ctrl = NightPhaseController(
             self.window_manager, self.network_client, players, my_username, room_id,
             is_seer, is_guard, is_wolf, wolf_usernames, 
-            seer_duration, guard_duration, wolf_duration
+            seer_duration, guard_duration, wolf_duration,
+            toast_manager=self.toast_manager
         )
         # Store night controller in window_manager so SEER_RESULT can access it
         self.window_manager.set_shared_data("night_phase_controller", night_ctrl)

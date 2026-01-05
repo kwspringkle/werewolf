@@ -168,6 +168,27 @@ class GameResultWindow(QtWidgets.QWidget):
         self.back_to_lobby_btn.clicked.connect(self.on_back_to_lobby)
         btn_row.addWidget(self.back_to_lobby_btn)
         
+        self.play_again_btn = QtWidgets.QPushButton("🔄 Play Again")
+        self.play_again_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2ecc71;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-weight: bold;
+                font-size: 15px;
+                padding: 12px 24px;
+            }
+            QPushButton:hover {
+                background-color: #3fe07a;
+            }
+            QPushButton:pressed {
+                background-color: #23b45a;
+            }
+        """)
+        self.play_again_btn.clicked.connect(self.on_play_again)
+        btn_row.addWidget(self.play_again_btn)
+        
         self.card_layout.addLayout(btn_row)
         
         main_layout.addWidget(card)
@@ -300,9 +321,39 @@ class GameResultWindow(QtWidgets.QWidget):
         return card
 
     def on_back_to_lobby(self):
-        """Navigate back to lobby"""
+        """Leave room and navigate back to lobby"""
         if self.window_manager:
+            # Leave room first
+            network_client = self.window_manager.get_shared_data("network_client")
+            if network_client:
+                try:
+                    network_client.send_packet(208, {})  # LEAVE_ROOM_REQ
+                except Exception as e:
+                    print(f"[WARNING] Failed to send leave room request: {e}")
+            
+            # Clear room data
+            self.window_manager.set_shared_data("current_room_id", None)
+            self.window_manager.set_shared_data("current_room_name", None)
+            self.window_manager.set_shared_data("is_host", False)
+            self.window_manager.set_shared_data("role_info", {})
+            
+            # Navigate to lobby
             self.window_manager.navigate_to("lobby")
+    
+    def on_play_again(self):
+        """Return to the same room to play again"""
+        if self.window_manager:
+            # Keep room data and navigate back to room
+            # The room should still exist on server (not deleted unless all players left)
+            room_id = self.window_manager.get_shared_data("current_room_id")
+            if room_id:
+                # Navigate back to room window
+                self.window_manager.navigate_to("room")
+            else:
+                # Room was deleted, go to lobby
+                if self.toast_manager:
+                    self.toast_manager.warning("Room no longer exists. Going to lobby.")
+                self.window_manager.navigate_to("lobby")
 
     def on_logout(self):
         """Handle logout"""

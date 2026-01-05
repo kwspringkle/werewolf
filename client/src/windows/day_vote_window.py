@@ -81,9 +81,13 @@ class DayVoteWindow(QtWidgets.QWidget):
         # Rebuild player cards
         self.rebuild_player_cards()
         
-        # Reset vote state
+        # Reset vote state - IMPORTANT: reset on every showEvent to allow voting in day 2, 3, etc.
         self.selected_username = None
         self.has_voted = False
+        # Re-enable buttons if alive
+        if self.my_is_alive:
+            self.submit_btn.setEnabled(False)  # Will be enabled when player selected
+            self.skip_btn.setEnabled(True)  # Skip is always available
 
         # Dead voter hint + disable voting UI
         if hasattr(self, "dead_hint_label"):
@@ -91,6 +95,9 @@ class DayVoteWindow(QtWidgets.QWidget):
         if not self.my_is_alive:
             self.submit_btn.setEnabled(False)
             self.skip_btn.setEnabled(False)
+        else:
+            # Alive: enable skip, submit will be enabled when player selected
+            self.skip_btn.setEnabled(True)
         
         # Only run local countdown if we don't have a shared server deadline
         if not deadline:

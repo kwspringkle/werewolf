@@ -168,7 +168,7 @@ static void execute_player(int room_index, int target_index) {
     cJSON_Delete(ev);
 }
 
-static int check_win_and_maybe_end(int room_index) {
+int check_win_and_maybe_end(int room_index) {
     int wolves_alive = 0;
     int others_alive = 0;
 
@@ -189,7 +189,7 @@ static int check_win_and_maybe_end(int room_index) {
         return 1;
     }
 
-    if (wolves_alive > others_alive) {
+    if (wolves_alive >= others_alive) {
         rooms[room_index].status = ROOM_FINISHED;
         rooms[room_index].day_phase_active = 0;
         rooms[room_index].night_phase_active = 0;
@@ -410,12 +410,13 @@ void start_night_phase(int room_index, int duration_seconds) {
     cJSON_AddNumberToObject(notif, "guard_duration", GUARD_PHASE_DURATION);
     cJSON_AddNumberToObject(notif, "wolf_duration", WOLF_PHASE_DURATION);
     
-    // Thêm players list với đầy đủ thông tin (username, is_alive)
+    // Thêm players list với đầy đủ thông tin (username, is_alive, role)
     cJSON *players_array = cJSON_CreateArray();
     for (int i = 0; i < rooms[room_index].current_players; i++) {
         cJSON *player_obj = cJSON_CreateObject();
         cJSON_AddStringToObject(player_obj, "username", rooms[room_index].players[i].username);
         cJSON_AddNumberToObject(player_obj, "is_alive", rooms[room_index].players[i].is_alive);
+        cJSON_AddNumberToObject(player_obj, "role", rooms[room_index].players[i].role);
         cJSON_AddItemToArray(players_array, player_obj);
     }
     cJSON_AddItemToObject(notif, "players", players_array);
@@ -463,6 +464,20 @@ void cleanup_empty_rooms() {
         // Legacy cleanup: no players
         if (rooms[i].current_players == 0) {
             printf("Cleaning up empty room %d ('%s')\n", rooms[i].id, rooms[i].name);
+            delete_room(i);
+            continue;
+        }
+
+        // Check if all players are disconnected (socket == 0)
+        int connected_count = 0;
+        for (int j = 0; j < rooms[i].current_players; j++) {
+            if (rooms[i].players[j].username[0] == '\0') continue;
+            if (rooms[i].players[j].socket > 0) connected_count++;
+        }
+        
+        // If all players disconnected, delete room
+        if (connected_count == 0) {
+            printf("Cleaning up room %d ('%s') - all players disconnected\n", rooms[i].id, rooms[i].name);
             delete_room(i);
             continue;
         }

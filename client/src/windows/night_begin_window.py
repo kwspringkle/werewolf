@@ -121,9 +121,24 @@ class NightBeginWindow(QtWidgets.QWidget):
             self.accept_or_close()
 
     def accept_or_close(self):
-        # Không tự động đóng - sẽ đợi PHASE_NIGHT từ server
-        # Window này sẽ được đóng bởi room_window khi nhận PHASE_NIGHT
-        pass
+        # Close window and start night phase
+        self.hide()
+        if hasattr(self, 'timer') and self.timer:
+            self.timer.stop()
+        
+        # Start night phase after night_begin closes
+        if self.window_manager:
+            pending = self.window_manager.get_shared_data("pending_night_phase")
+            if pending:
+                room_window = self.window_manager.windows.get("room")
+                if room_window and hasattr(room_window, "start_night_phase"):
+                    room_window.start_night_phase(
+                        pending["duration"],
+                        pending["seer_duration"],
+                        pending["guard_duration"],
+                        pending["wolf_duration"]
+                    )
+                    self.window_manager.set_shared_data("pending_night_phase", None)
 
     def closeEvent(self, event):
         if hasattr(self, 'timer'):
