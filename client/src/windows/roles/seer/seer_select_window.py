@@ -17,6 +17,14 @@ class SeerSelectWindow(QtWidgets.QWidget):
         self.window_manager = window_manager
         self.toast_manager = toast_manager
         self.selected_username = None
+        self.my_is_alive = True
+        try:
+            for p in (players or []):
+                if isinstance(p, dict) and p.get("username") == my_username:
+                    self.my_is_alive = int(p.get("is_alive", 1)) != 0
+                    break
+        except Exception:
+            self.my_is_alive = True
         self.setObjectName("seer_select_window")
         self.setWindowTitle("Seer — Pick a player")
         self.setup_ui()
@@ -76,6 +84,19 @@ class SeerSelectWindow(QtWidgets.QWidget):
         hint_label.setStyleSheet("font-size: 12px; color: #cccccc; margin-top: 2px;")
         self.card_layout.addWidget(hint_label)
 
+        self.dead_hint_label = QtWidgets.QLabel("Bạn đã chết nên không thể chọn ai. Bạn vẫn có thể bấm Skip.")
+        self.dead_hint_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.dead_hint_label.setVisible(not self.my_is_alive)
+        self.dead_hint_label.setStyleSheet("""
+            font-size: 12px;
+            color: #f39c12;
+            background-color: rgba(243, 156, 18, 0.12);
+            padding: 6px;
+            border-radius: 6px;
+            margin-top: 6px;
+        """)
+        self.card_layout.addWidget(self.dead_hint_label)
+
 
         # Grid chọn user dạng card nhỏ vuông như lobby
         self.user_grid_widget = QtWidgets.QWidget()
@@ -87,9 +108,16 @@ class SeerSelectWindow(QtWidgets.QWidget):
         col_count = 3
         row = 0
         col = 0
-        print(f"[DEBUG] SeerSelectWindow rendering {len(self.players)} players")
-        for p in self.players:
-            uname = p.get("username") if isinstance(p, dict) else str(p)
+        safe_players = []
+        for p in (self.players or []):
+            if isinstance(p, dict) or isinstance(p, str):
+                safe_players.append(p)
+
+        print(f"[DEBUG] SeerSelectWindow rendering {len(safe_players)} players")
+        for p in safe_players:
+            uname = (p.get("username") if isinstance(p, dict) else str(p))
+            if not uname:
+                uname = "(Unknown)"
             raw_alive = p.get("is_alive", 1) if isinstance(p, dict) else 1
             try:
                 is_alive = int(raw_alive) != 0
@@ -149,8 +177,8 @@ class SeerSelectWindow(QtWidgets.QWidget):
                 card_item.setEnabled(False)
                 name_label.setText(uname + "\n(You — already know)")
 
-            # Chỉ make clickable nếu player còn sống và không phải self
-            if is_alive and (not is_self):
+            # Clickable only if: seer is alive AND target is alive AND not self
+            if self.my_is_alive and is_alive and (not is_self):
                 card_item.mousePressEvent = self._make_card_click(card_item, uname)
                 card_item.setCursor(QtCore.Qt.PointingHandCursor)
             else:
@@ -278,6 +306,12 @@ class SeerSelectWindow(QtWidgets.QWidget):
         return handler
 
     def on_select(self):
+        if not self.my_is_alive:
+            try:
+                QtWidgets.QMessageBox.information(self, "Info", "Bạn đã chết nên không thể chọn ai.")
+            except Exception:
+                pass
+            return
         target = self.selected_username
         if not target:
             QtWidgets.QMessageBox.warning(self, "Select player", "Please select a player to reveal")
@@ -366,6 +400,15 @@ class SeerSelectWindow(QtWidgets.QWidget):
         # Disable buttons
         self.select_btn.setEnabled(False)
         self.skip_btn.setEnabled(False)
+        # Send skip to server so phase can advance immediately
+        if self.network_client and self.room_id is not None:
+            try:
+                if hasattr(self.network_client, "send_seer_check"):
+                    self.network_client.send_seer_check(self.room_id, "")
+                else:
+                    self.network_client.send_packet(405, {"room_id": self.room_id, "target_username": ""})
+            except Exception:
+                pass
         # Close window - will trigger destroyed signal
         self.close()
 

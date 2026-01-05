@@ -101,10 +101,10 @@ void seer_handle_check(int room_index, int requester_index, const char *target_u
     }
 
     Player *requester = &rooms[room_index].players[requester_index];
-    // Kiểm tra có còn sống không
-    if (!requester->is_alive || requester->role != ROLE_SEER) {
+    // Role must be seer. Alive is only required for actually checking; skip is allowed even if dead.
+    if (requester->role != ROLE_SEER) {
         cJSON_AddStringToObject(response, "status", "fail");
-        cJSON_AddStringToObject(response, "message", "You are not an alive Seer");
+        cJSON_AddStringToObject(response, "message", "You are not the Seer");
         return;
     }
 
@@ -127,6 +127,32 @@ void seer_handle_check(int room_index, int requester_index, const char *target_u
     if (rooms[room_index].seer_deadline != 0 && now > rooms[room_index].seer_deadline) {
         cJSON_AddStringToObject(response, "status", "fail");
         cJSON_AddStringToObject(response, "message", "Seer selection window has expired");
+        return;
+    }
+
+    // Skip: allow even if dead; advances to guard phase immediately.
+    if (!target_username || target_username[0] == '\0') {
+        rooms[room_index].seer_choice_made = 1;
+        rooms[room_index].seer_chosen_target[0] = '\0';
+
+        cJSON_AddStringToObject(response, "status", "success");
+        cJSON_AddBoolToObject(response, "skipped", 1);
+
+        printf("[SERVER] Seer skipped, broadcasting PHASE_GUARD_START to all players in room %d\n", rooms[room_index].id);
+        cJSON *guard_notif = cJSON_CreateObject();
+        cJSON_AddStringToObject(guard_notif, "type", "phase_guard_start");
+        cJSON_AddNumberToObject(guard_notif, "guard_duration", GUARD_PHASE_DURATION);
+        char *guard_notif_str = cJSON_PrintUnformatted(guard_notif);
+        broadcast_room(room_index, PHASE_GUARD_START, guard_notif_str);
+        free(guard_notif_str);
+        cJSON_Delete(guard_notif);
+        return;
+    }
+
+    // Kiểm tra còn sống để thực hiện check
+    if (!requester->is_alive) {
+        cJSON_AddStringToObject(response, "status", "fail");
+        cJSON_AddStringToObject(response, "message", "You are dead and cannot check");
         return;
     }
 

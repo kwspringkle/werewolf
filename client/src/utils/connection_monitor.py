@@ -20,33 +20,70 @@ class ConnectionMonitor(QtCore.QObject):
         self.is_connected = True
         self.reconnect_attempts = 0
         self.max_reconnect_attempts = 5
+
+        # Heartbeat tuning
+        # Server pings periodically, but during gameplay the client may still be receiving other packets.
+        # Treat any inbound traffic as "activity" and use a more tolerant timeout to avoid false disconnects.
+        self.check_interval_ms = 10_000
+        self.pong_timeout_seconds = 180
+
+        # Optional client-initiated ping (in addition to server->client ping).
+        # Helps detect half-open connections where no packets arrive.
+        self.ping_interval_ms = 25_000
         
         # Timer kiểm tra connection
         self.check_timer = QtCore.QTimer()
         self.check_timer.timeout.connect(self.check_connection)
+
+        self.ping_timer = QtCore.QTimer()
+        self.ping_timer.timeout.connect(self.send_ping)
         
     def start(self):
         """Bắt đầu monitor"""
         self.last_pong_time = time.time()
         self.is_connected = True
-        self.check_timer.start(5000)  # Check mỗi 5 giây
+        self.check_timer.start(self.check_interval_ms)
+        self.ping_timer.start(self.ping_interval_ms)
         
     def stop(self):
         """Dừng monitor"""
         self.check_timer.stop()
+        self.ping_timer.stop()
+
+    def send_ping(self):
+        """Gửi ping định kỳ để keepalive / detect dead links."""
+        if not self.is_connected:
+            return
+        try:
+            if hasattr(self.network_client, "send_ping"):
+                self.network_client.send_ping()
+        except Exception:
+            # If sending fails, connection is likely broken.
+            if self.is_connected:
+                self.is_connected = False
+                self.connection_lost.emit()
+                self.handle_connection_lost()
         
     def on_pong_received(self):
         """Gọi khi nhận được pong từ server"""
         self.last_pong_time = time.time()
         self.is_connected = True
         self.reconnect_attempts = 0
+
+    def on_activity(self):
+        """Gọi khi nhận được bất kỳ packet nào từ server (treat as alive)."""
+        self.on_pong_received()
         
     def check_connection(self):
         """Kiểm tra trạng thái kết nối"""
         elapsed = time.time() - self.last_pong_time
         
-        # Nếu không nhận pong trong 60 giây -> coi như mất kết nối
-        if elapsed > 60 and self.is_connected:
+        # Nếu không nhận activity trong một khoảng thời gian -> coi như mất kết nối
+        if elapsed > self.pong_timeout_seconds and self.is_connected:
+            try:
+                print(f"[DEBUG] ConnectionMonitor: no activity for {int(elapsed)}s -> connection_lost")
+            except Exception:
+                pass
             self.is_connected = False
             self.connection_lost.emit()
             self.handle_connection_lost()

@@ -42,7 +42,10 @@ class NightPhaseController:
     def start_seer_phase(self):
         if self.is_seer:
             print("[DEBUG] User is seer - creating and showing SeerSelectWindow")
-            print(f"[DEBUG] Seer select - players list: {[p.get('username', 'unknown') for p in self.players]}")
+            try:
+                print(f"[DEBUG] Seer select - players list: {[p.get('username', 'unknown') if isinstance(p, dict) else str(p) for p in (self.players or [])]}")
+            except Exception:
+                print("[DEBUG] Seer select - players list: <unavailable>")
             print(f"[DEBUG] Seer select - total players: {len(self.players)}")
             try:
                 self.seer_window = SeerSelectWindow(
@@ -72,8 +75,7 @@ class NightPhaseController:
                 self.window_manager.register_window("seer_wait", self.seer_window)
                 self.window_manager.navigate_to("seer_wait")
                 print("[DEBUG] SeerWaitWindow navigated successfully")
-                # For non-seer players, wait for seer_duration then move to guard phase
-                QtCore.QTimer.singleShot(self.seer_duration * 1000, self._on_seer_phase_timeout)
+                # Do NOT auto-advance locally; wait for server PHASE_GUARD_START.
             except Exception as e:
                 print(f"[ERROR] Failed to show SeerWaitWindow: {e}")
                 import traceback
@@ -82,19 +84,8 @@ class NightPhaseController:
     def _on_seer_window_closed(self):
         """Called when seer select window is closed (either by choice or skip)"""
         print("[DEBUG] Seer window closed")
-        # If seer made a choice, wait for result from server (handle_seer_result will be called)
-        # If seer skipped or timed out, move to guard phase
-        if not self.seer_choice_made:
-            print("[DEBUG] Seer skipped or timed out, moving to guard phase...")
-            self.seer_window = None
-            self.start_guard_phase()
-    
-    def _on_seer_phase_timeout(self):
-        """Called when seer phase timeout (for non-seer players)"""
-        print("[DEBUG] Seer phase timeout, moving to guard phase...")
-        if self.seer_window:
-            self.seer_window.close()
-        self.start_guard_phase()
+        # Always wait for server-driven transitions (SEER_RESULT + PHASE_GUARD_START).
+        self.seer_window = None
     
     def handle_seer_result(self, target_username, is_werewolf):
         """Handle SEER_RESULT packet from server"""
@@ -170,8 +161,7 @@ class NightPhaseController:
             self.guard_window = GuardWaitWindow(self.guard_duration)
             self.window_manager.register_window("guard_wait", self.guard_window)
             self.window_manager.navigate_to("guard_wait")
-            # Không tự động chuyển sang wolf phase - đợi server broadcast PHASE_WOLF_START
-            # Timer chỉ để đóng window nếu cần
+            # Do NOT auto-advance locally; wait for server PHASE_WOLF_START.
 
     def start_wolf_phase(self):
         # Tránh chuyển phase nhiều lần

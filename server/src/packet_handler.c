@@ -17,6 +17,8 @@
 #include "protocol.h"
 #include "cJSON.h"
 
+static void handle_day_vote(int client_fd, cJSON *json);
+
 void send_packet(int client_fd, uint16_t header, const char *payload) {
     uint32_t len = strlen(payload);
 
@@ -48,13 +50,7 @@ void handle_ping(int client_fd, cJSON *json) {
         printf("[SERVER] Received PING from client %d (user: %s)\n", client_fd, session->username);
     }
     
-    // Check if it's a ping packet (client sends ping to check server)
-    cJSON *type = cJSON_GetObjectItem(json, "type");
-    if (type && cJSON_IsString(type) && strcmp(type->valuestring, "ping") == 0) {
-        // It's a ping packet, respond with pong
-        return;
-    }
-    
+    // Client-initiated PING: always respond with PONG.
     cJSON *pong = cJSON_CreateObject();
     cJSON_AddStringToObject(pong, "type", "pong");
     char *pong_str = cJSON_PrintUnformatted(pong);
@@ -184,9 +180,9 @@ void handle_login(int client_fd, cJSON *json){
                                     resume_room_id = rooms[r].id;
                                     resume_room_status = rooms[r].status;
 
-                                    // Requirement: on reconnect, user returns as dead spectator.
-                                    if (rooms[r].status == ROOM_PLAYING) {
-                                        rooms[r].players[i].is_alive = 0;
+                                    // On reconnect, user keeps their alive/dead state.
+                                    // Spectator mode is only for users who are already dead.
+                                    if (rooms[r].status == ROOM_PLAYING && !rooms[r].players[i].is_alive) {
                                         resume_as_spectator = 1;
                                     }
 
@@ -493,29 +489,28 @@ void handle_disconnect(int client_fd) {
 
                 // Check if game is in progress
                 if (rooms[room_index].status == ROOM_PLAYING) {
-                    // Mark player as dead instead of removing them
-                    rooms[room_index].players[player_index].is_alive = 0;
-                    // Clear socket to avoid sending to a stale fd (fd numbers can be reused)
+                    // Do NOT mark player dead on disconnect.
+                    // Just clear socket to avoid sending to a stale fd (fd numbers can be reused).
                     rooms[room_index].players[player_index].socket = 0;
                     if (rooms[room_index].host_socket == client_fd) {
                         rooms[room_index].host_socket = 0;
                     }
-                    printf("Player %s in room %d marked as dead (disconnected during game)\n", 
-                           username, rooms[room_index].id);
+                    printf("Player %s in room %d disconnected during game (kept alive status=%d)\n",
+                           username, rooms[room_index].id, rooms[room_index].players[player_index].is_alive);
                     
-                    // Broadcast player death to room
+                    // Broadcast disconnect to room
                     cJSON *update = cJSON_CreateObject();
                     cJSON_AddStringToObject(update, "type", "player_disconnected");
                     cJSON_AddStringToObject(update, "username", username);
-                    cJSON_AddStringToObject(update, "message", "Player disconnected and is considered dead");
+                    cJSON_AddStringToObject(update, "message", "Player disconnected");
                     cJSON_AddBoolToObject(update, "game_started", true);  // Game đã start
 
                     char *update_str = cJSON_PrintUnformatted(update);
                     broadcast_room(room_index, ROOM_STATUS_UPDATE, update_str);
                     free(update_str);
                     cJSON_Delete(update);
-                    
-                    // TODO: Check win condition after disconnect
+
+                    // Room is not deleted here; players may reconnect and continue.
                 } else {
                     // Game not started yet, remove player normally
                     for (int i = player_index; i < rooms[room_index].current_players - 1; i++) {
@@ -605,6 +600,11 @@ void handle_leave_room(int client_fd, cJSON *json) {
         
         if (player_index != -1) {
             rooms[room_index].players[player_index].is_alive = 0;
+            // Clear socket to avoid stale-fd broadcasts and allow room cleanup logic to detect emptiness.
+            rooms[room_index].players[player_index].socket = 0;
+            if (rooms[room_index].host_socket == client_fd) {
+                rooms[room_index].host_socket = 0;
+            }
             
             cJSON_AddStringToObject(response, "status", "success");
             cJSON_AddStringToObject(response, "message", "You left the game and are considered dead");
@@ -626,6 +626,17 @@ void handle_leave_room(int client_fd, cJSON *json) {
             
             printf("Player %s left room %d during game (marked as dead)\n", 
                    rooms[room_index].players[player_index].username, rooms[room_index].id);
+
+            // If everyone is dead/disconnected, end and delete the room.
+            int alive_count = 0;
+            for (int j = 0; j < rooms[room_index].current_players; j++) {
+                if (rooms[room_index].players[j].username[0] == '\0') continue;
+                if (rooms[room_index].players[j].is_alive) alive_count++;
+            }
+            if (alive_count == 0) {
+                printf("[SERVER] All players in room %d are dead/disconnected. Deleting room and stopping game.\n", rooms[room_index].id);
+                delete_room(room_index);
+            }
         }
         return;
     }
@@ -748,6 +759,21 @@ void handle_get_room_info(int client_fd, cJSON *json) {
     cJSON_AddStringToObject(response, "room_name", rooms[room_index].name);
     cJSON_AddNumberToObject(response, "current_players", rooms[room_index].current_players);
     cJSON_AddNumberToObject(response, "max_players", MAX_PLAYERS_PER_ROOM);
+
+    // Day phase voting state (for resume)
+    cJSON_AddNumberToObject(response, "day_phase_active", rooms[room_index].day_phase_active);
+    cJSON_AddNumberToObject(response, "day_round", rooms[room_index].day_round);
+    cJSON_AddNumberToObject(response, "day_deadline", (double)rooms[room_index].day_deadline);
+    if (rooms[room_index].day_round == 2 && rooms[room_index].day_candidate_count > 0) {
+        cJSON *cand = cJSON_CreateArray();
+        for (int i = 0; i < rooms[room_index].day_candidate_count; i++) {
+            int idx = rooms[room_index].day_candidate_indices[i];
+            if (idx >= 0 && idx < rooms[room_index].current_players) {
+                cJSON_AddItemToArray(cand, cJSON_CreateString(rooms[room_index].players[idx].username));
+            }
+        }
+        cJSON_AddItemToObject(response, "day_candidates", cand);
+    }
     cJSON_AddNumberToObject(response, "room_status", rooms[room_index].status);
 
     // Phase hints for resume
@@ -779,6 +805,75 @@ void handle_get_room_info(int client_fd, cJSON *json) {
     send_packet(client_fd, GET_ROOM_INFO_RES, res_str);
     free(res_str);
     cJSON_Delete(response);
+}
+
+static int _find_player_index_by_socket(int room_index, int client_fd) {
+    for (int i = 0; i < rooms[room_index].current_players; i++) {
+        if (rooms[room_index].players[i].socket == client_fd) return i;
+    }
+    return -1;
+}
+
+static int _find_player_index_by_username(int room_index, const char *username) {
+    for (int i = 0; i < rooms[room_index].current_players; i++) {
+        if (rooms[room_index].players[i].username[0] == '\0') continue;
+        if (strcmp(rooms[room_index].players[i].username, username) == 0) return i;
+    }
+    return -1;
+}
+
+static int _is_round2_candidate(int room_index, int target_index) {
+    if (rooms[room_index].day_round != 2) return 1;
+    for (int i = 0; i < rooms[room_index].day_candidate_count; i++) {
+        if (rooms[room_index].day_candidate_indices[i] == target_index) return 1;
+    }
+    return 0;
+}
+
+static void handle_day_vote(int client_fd, cJSON *json) {
+    cJSON *room_id_obj = cJSON_GetObjectItemCaseSensitive(json, "room_id");
+    cJSON *target_obj = cJSON_GetObjectItemCaseSensitive(json, "target_username");
+
+    if (!room_id_obj || !cJSON_IsNumber(room_id_obj) || !target_obj || !cJSON_IsString(target_obj)) {
+        return;
+    }
+
+    int room_id = room_id_obj->valueint;
+    int room_index = -1;
+    for (int i = 0; i < MAX_ROOMS; i++) {
+        if (rooms[i].id == room_id) {
+            room_index = i;
+            break;
+        }
+    }
+    if (room_index == -1) return;
+
+    if (rooms[room_index].status != ROOM_PLAYING || !rooms[room_index].day_phase_active) {
+        return;
+    }
+
+    int voter_index = _find_player_index_by_socket(room_index, client_fd);
+    if (voter_index == -1) return;
+    if (!rooms[room_index].players[voter_index].is_alive) return; // dead can't vote
+
+    const char *target_username = target_obj->valuestring;
+    if (!target_username || target_username[0] == '\0') {
+        rooms[room_index].day_votes[voter_index][0] = '\0';
+        rooms[room_index].day_vote_responded[voter_index] = 1;
+        maybe_finalize_day_votes_early(room_index);
+        return;
+    }
+
+    int target_index = _find_player_index_by_username(room_index, target_username);
+    if (target_index == -1) return;
+    if (!rooms[room_index].players[target_index].is_alive) return;
+    if (!_is_round2_candidate(room_index, target_index)) return;
+
+    strncpy(rooms[room_index].day_votes[voter_index], target_username, 49);
+    rooms[room_index].day_votes[voter_index][49] = '\0';
+
+    rooms[room_index].day_vote_responded[voter_index] = 1;
+    maybe_finalize_day_votes_early(room_index);
 }
 
 // Bắt đầu game
@@ -1003,6 +1098,9 @@ void process_packet(int client_fd, uint16_t header, const char *payload) {
             break;
         case CHAT_REQ: // 401
             handle_chat_message(client_fd, json);
+            break;
+        case VOTE_REQ: // 409
+            handle_day_vote(client_fd, json);
             break;
         default:
             printf("Unknown packet header: %d\n", header);

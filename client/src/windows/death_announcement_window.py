@@ -13,8 +13,8 @@ class DeathAnnouncementWindow(QtWidgets.QWidget):
         self.preserve_window_flags = False
         self.toast_manager = toast_manager
         self.window_manager = window_manager
-        self.duration = 10
-        self.remaining = 10
+        self.duration = 5
+        self.remaining = 5
         self.timer = None
         self.dead_players = []  # List of usernames who died
         self.setObjectName("death_announcement_window")

@@ -106,10 +106,10 @@ void guard_handle_protect(int room_index, int requester_index, const char *targe
     }
 
     Player *requester = &rooms[room_index].players[requester_index];
-    // Kiểm tra có còn sống không
-    if (!requester->is_alive || requester->role != ROLE_GUARD) {
+    // Role must be guard. Alive is only required for actually protecting; skip is allowed even if dead.
+    if (requester->role != ROLE_GUARD) {
         cJSON_AddStringToObject(response, "status", "fail");
-        cJSON_AddStringToObject(response, "message", "You are not an alive Guard");
+        cJSON_AddStringToObject(response, "message", "You are not the Guard");
         return;
     }
 
@@ -132,6 +132,32 @@ void guard_handle_protect(int room_index, int requester_index, const char *targe
     if (rooms[room_index].guard_deadline != 0 && now > rooms[room_index].guard_deadline) {
         cJSON_AddStringToObject(response, "status", "fail");
         cJSON_AddStringToObject(response, "message", "Guard selection window has expired");
+        return;
+    }
+
+    // Skip: allow even if dead; advances to wolf phase immediately.
+    if (!target_username || target_username[0] == '\0') {
+        rooms[room_index].guard_choice_made = 1;
+        rooms[room_index].guard_protected_username[0] = '\0';
+
+        cJSON_AddStringToObject(response, "status", "success");
+        cJSON_AddBoolToObject(response, "skipped", 1);
+
+        printf("[SERVER] Guard skipped, broadcasting PHASE_WOLF_START to all players in room %d\n", rooms[room_index].id);
+        cJSON *wolf_notif = cJSON_CreateObject();
+        cJSON_AddStringToObject(wolf_notif, "type", "phase_wolf_start");
+        cJSON_AddNumberToObject(wolf_notif, "wolf_duration", WOLF_PHASE_DURATION);
+        char *wolf_notif_str = cJSON_PrintUnformatted(wolf_notif);
+        broadcast_room(room_index, PHASE_WOLF_START, wolf_notif_str);
+        free(wolf_notif_str);
+        cJSON_Delete(wolf_notif);
+        return;
+    }
+
+    // Kiểm tra còn sống để thực hiện protect
+    if (!requester->is_alive) {
+        cJSON_AddStringToObject(response, "status", "fail");
+        cJSON_AddStringToObject(response, "message", "You are dead and cannot protect");
         return;
     }
 

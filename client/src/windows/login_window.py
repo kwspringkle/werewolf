@@ -331,6 +331,17 @@ class LoginWindow(QtWidgets.QWidget):
             self.window_manager.set_shared_data("is_host", False)
             self.window_manager.set_shared_data("spectator_mode", True)
 
+            # Day phase voting state (for resume into day)
+            try:
+                day_deadline = payload.get("day_deadline")
+                day_candidates = payload.get("day_candidates")
+                if day_deadline:
+                    self.window_manager.set_shared_data("day_vote_deadline", float(day_deadline))
+                if isinstance(day_candidates, list) and day_candidates:
+                    self.window_manager.set_shared_data("day_vote_candidates", day_candidates)
+            except Exception:
+                pass
+
             # Start RoomWindow in background so it can receive/dispatch packets,
             # without ever showing the Room window (avoid black Room window after resume).
             try:

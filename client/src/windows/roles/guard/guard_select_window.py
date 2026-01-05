@@ -16,6 +16,14 @@ class GuardSelectWindow(QtWidgets.QWidget):
         self.window_manager = window_manager
         self.toast_manager = toast_manager
         self.selected_username = None
+        self.my_is_alive = True
+        try:
+            for p in (players or []):
+                if isinstance(p, dict) and p.get("username") == my_username:
+                    self.my_is_alive = int(p.get("is_alive", 1)) != 0
+                    break
+        except Exception:
+            self.my_is_alive = True
         self.setObjectName("guard_select_window")
         self.setWindowTitle("Guard — Protect a player")
         self.setup_ui()
@@ -69,6 +77,19 @@ class GuardSelectWindow(QtWidgets.QWidget):
         title_label.setStyleSheet("font-size: 22px; color: #43d9ad; font-weight: bold;")
         self.card_layout.addWidget(title_label)
 
+        self.dead_hint_label = QtWidgets.QLabel("Bạn đã chết nên không thể chọn ai. Bạn vẫn có thể bấm Skip.")
+        self.dead_hint_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.dead_hint_label.setVisible(not self.my_is_alive)
+        self.dead_hint_label.setStyleSheet("""
+            font-size: 12px;
+            color: #43d9ad;
+            background-color: rgba(67, 217, 173, 0.12);
+            padding: 6px;
+            border-radius: 6px;
+            margin-top: 6px;
+        """)
+        self.card_layout.addWidget(self.dead_hint_label)
+
         # Grid chọn user dạng card nhỏ vuông như lobby
         # Wrap trong scroll area để có thể scroll nếu có nhiều players
         scroll_area = QtWidgets.QScrollArea()
@@ -97,8 +118,15 @@ class GuardSelectWindow(QtWidgets.QWidget):
         print(f"[DEBUG] GuardSelectWindow rendering {len(self.players)} players")
         print(f"[DEBUG] GuardSelectWindow players list: {self.players}")
         # Đảm bảo hiển thị TẤT CẢ players, không filter
-        for p in self.players:
-            uname = p.get("username") if isinstance(p, dict) else str(p)
+        safe_players = []
+        for p in (self.players or []):
+            if isinstance(p, dict) or isinstance(p, str):
+                safe_players.append(p)
+
+        for p in safe_players:
+            uname = (p.get("username") if isinstance(p, dict) else str(p))
+            if not uname:
+                uname = "(Unknown)"
             raw_alive = p.get("is_alive", 1) if isinstance(p, dict) else 1
             try:
                 is_alive = int(raw_alive) != 0
@@ -156,8 +184,8 @@ class GuardSelectWindow(QtWidgets.QWidget):
             name_label.setWordWrap(True)
             card_item_layout.addWidget(name_label)
 
-            # Chỉ make clickable nếu player còn sống
-            if is_alive:
+            # Clickable only if: guard is alive AND target is alive
+            if self.my_is_alive and is_alive:
                 card_item.mousePressEvent = self._make_card_click(card_item, uname, is_alive)
                 card_item.setCursor(QtCore.Qt.PointingHandCursor)
             else:
@@ -281,6 +309,12 @@ class GuardSelectWindow(QtWidgets.QWidget):
         return handler
 
     def on_select(self):
+        if not self.my_is_alive:
+            try:
+                QtWidgets.QMessageBox.information(self, "Info", "Bạn đã chết nên không thể chọn ai.")
+            except Exception:
+                pass
+            return
         target = self.selected_username
         if not target:
             QtWidgets.QMessageBox.warning(self, "Select player", "Please select a player to protect")
@@ -359,8 +393,16 @@ class GuardSelectWindow(QtWidgets.QWidget):
         # Vô hiệu hóa nút
         self.select_btn.setEnabled(False)
         self.skip_btn.setEnabled(False)
-        # Close window - server sẽ broadcast PHASE_WOLF_START khi timeout
-        # Không cần gửi gì lên server, chỉ cần đóng window
+        # Send skip to server so phase can advance immediately
+        if self.network_client and self.room_id is not None:
+            try:
+                if hasattr(self.network_client, "send_guard_protect"):
+                    self.network_client.send_guard_protect(self.room_id, "")
+                else:
+                    self.network_client.send_packet(407, {"room_id": self.room_id, "target_username": ""})
+            except Exception:
+                pass
+        # Close window - server will broadcast PHASE_WOLF_START
         self.close()
 
     def closeEvent(self, event):

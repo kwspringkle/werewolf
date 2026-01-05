@@ -188,6 +188,7 @@ class WolfSelectWindow(QtWidgets.QWidget):
 
         self.skip_btn = QtWidgets.QPushButton("Skip")
         self.skip_btn.setMinimumHeight(35)
+        self.skip_btn.setEnabled(self.can_vote)
         self.skip_btn.setStyleSheet("""
             QPushButton {
                 background-color: #555555;
@@ -379,6 +380,28 @@ class WolfSelectWindow(QtWidgets.QWidget):
         self.close()
 
     def on_skip(self):
+        # Dead wolves cannot skip (no server action), but the window should still close (e.g. on timeout).
+        if not self.can_vote:
+            try:
+                if hasattr(self, 'timer'):
+                    self.timer.stop()
+            except Exception:
+                pass
+            self.close()
+            return
+
+        if hasattr(self, 'timer'):
+            self.timer.stop()
+
+        self.select_btn.setEnabled(False)
+        self.skip_btn.setEnabled(False)
+
+        if self.network_client and self.room_id is not None:
+            try:
+                self.network_client.send_wolf_kill(self.room_id, "")
+            except Exception:
+                pass
+
         self.close()
 
     def closeEvent(self, event):
