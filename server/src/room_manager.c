@@ -189,7 +189,7 @@ int check_win_and_maybe_end(int room_index) {
         return 1;
     }
 
-    if (wolves_alive > others_alive) {
+    if (wolves_alive >= others_alive) {
         rooms[room_index].status = ROOM_FINISHED;
         rooms[room_index].day_phase_active = 0;
         rooms[room_index].night_phase_active = 0;
