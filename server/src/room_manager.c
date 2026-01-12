@@ -21,6 +21,7 @@ void delete_room(int room_index) {
         rooms[room_index].players[i].username[0] = '\0';
         rooms[room_index].players[i].role = 0;
         rooms[room_index].players[i].is_alive = 0;
+        rooms[room_index].players[i].disconnect_time = 0;
         rooms[room_index].wolf_votes[i][0] = '\0';
     }
 
@@ -712,6 +713,54 @@ void check_wolf_phase_timeout() {
                 // Kết thúc night phase (đã xử lý trước đó)
                 rooms[i].night_phase_active = 0;
             }
+        }
+    }
+}
+
+// Check disconnected players timeout (2 phút) và đánh chết nếu quá hạn
+void check_disconnect_timeouts() {
+    time_t now = time(NULL);
+    
+    for (int r = 0; r < MAX_ROOMS; r++) {
+        if (rooms[r].id == 0) continue;
+        if (rooms[r].status != ROOM_PLAYING) continue;
+        
+        int someone_died = 0;
+        
+        for (int i = 0; i < rooms[r].current_players; i++) {
+            // Chỉ check những player đang disconnect (socket = 0) và còn sống
+            if (rooms[r].players[i].socket == 0 && 
+                rooms[r].players[i].is_alive &&
+                rooms[r].players[i].disconnect_time > 0) {
+                
+                time_t elapsed = now - rooms[r].players[i].disconnect_time;
+                
+                if (elapsed >= DISCONNECT_TIMEOUT) {
+                    // Đánh chết player do disconnect quá lâu
+                    rooms[r].players[i].is_alive = 0;
+                    someone_died = 1;
+                    
+                    printf("[SERVER] Player %s in room %d marked dead due to disconnect timeout (%ld seconds)\n",
+                           rooms[r].players[i].username, rooms[r].id, (long)elapsed);
+                    
+                    // Broadcast thông báo player bị loại do disconnect
+                    cJSON *update = cJSON_CreateObject();
+                    cJSON_AddStringToObject(update, "type", "player_eliminated");
+                    cJSON_AddStringToObject(update, "username", rooms[r].players[i].username);
+                    cJSON_AddStringToObject(update, "reason", "disconnect_timeout");
+                    cJSON_AddStringToObject(update, "message", "Player eliminated due to disconnect timeout (2 minutes)");
+                    
+                    char *update_str = cJSON_PrintUnformatted(update);
+                    broadcast_room(r, ROOM_STATUS_UPDATE, update_str);
+                    free(update_str);
+                    cJSON_Delete(update);
+                }
+            }
+        }
+        
+        // Nếu có người chết do disconnect, check win condition
+        if (someone_died) {
+            check_win_and_maybe_end(r);
         }
     }
 }

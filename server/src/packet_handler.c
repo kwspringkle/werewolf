@@ -174,8 +174,24 @@ void handle_login(int client_fd, cJSON *json){
                             if (rooms[r].id == 0) continue;
                             for (int i = 0; i < rooms[r].current_players; i++) {
                                 if (strcmp(rooms[r].players[i].username, user->valuestring) == 0) {
+                                    // Check disconnect timeout (2 phút)
+                                    time_t disconnect_time = rooms[r].players[i].disconnect_time;
+                                    if (disconnect_time > 0 && rooms[r].status == ROOM_PLAYING) {
+                                        time_t elapsed = time(NULL) - disconnect_time;
+                                        if (elapsed > DISCONNECT_TIMEOUT) {
+                                            // Quá 2 phút - đánh chết player
+                                            if (rooms[r].players[i].is_alive) {
+                                                rooms[r].players[i].is_alive = 0;
+                                                printf("Player %s marked dead due to disconnect timeout (%ld seconds)\n",
+                                                       user->valuestring, (long)elapsed);
+                                            }
+                                            resume_as_spectator = 1;
+                                        }
+                                    }
+                                    
                                     int old_socket = rooms[r].players[i].socket;
                                     rooms[r].players[i].socket = client_fd;
+                                    rooms[r].players[i].disconnect_time = 0;  // Clear disconnect time on reconnect
 
                                     resume_room_id = rooms[r].id;
                                     resume_room_status = rooms[r].status;
@@ -489,14 +505,16 @@ void handle_disconnect(int client_fd) {
 
                 // Check if game is in progress
                 if (rooms[room_index].status == ROOM_PLAYING) {
-                    // Do NOT mark player dead on disconnect.
-                    // Just clear socket to avoid sending to a stale fd (fd numbers can be reused).
+                    // Do NOT mark player dead on disconnect immediately.
+                    // Give them 2 minutes (DISCONNECT_TIMEOUT) to reconnect.
+                    // Just clear socket and record disconnect time.
                     rooms[room_index].players[player_index].socket = 0;
+                    rooms[room_index].players[player_index].disconnect_time = time(NULL);
                     if (rooms[room_index].host_socket == client_fd) {
                         rooms[room_index].host_socket = 0;
                     }
-                    printf("Player %s in room %d disconnected during game (kept alive status=%d)\n",
-                           username, rooms[room_index].id, rooms[room_index].players[player_index].is_alive);
+                    printf("Player %s in room %d disconnected during game (kept alive status=%d, has %d seconds to reconnect)\n",
+                           username, rooms[room_index].id, rooms[room_index].players[player_index].is_alive, DISCONNECT_TIMEOUT);
                     
                     // Broadcast disconnect to room
                     cJSON *update = cJSON_CreateObject();

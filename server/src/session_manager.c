@@ -81,7 +81,6 @@ void check_timeouts() {
 
     for (int i = 0; i < MAX_SESSIONS; i++) {
         if (sessions[i].is_logged_in){
-            // Increased timeout from 90s to 180s to prevent false disconnects during intensive UI operations
             if (now - sessions[i].last_ping >= 180) {
                 printf("Client %d (%s) timed out due to inactivity (no PONG for 180s).\n",
                        sessions[i].socket, sessions[i].username);

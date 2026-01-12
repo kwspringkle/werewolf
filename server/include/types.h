@@ -25,6 +25,9 @@ typedef struct Room Room;
 #define DAY_PHASE_DURATION 120
 #define DAY_TIE_BREAK_DURATION 30
 
+// Disconnect timeout: player phải reconnect trong 2 phút, nếu không sẽ bị coi là chết
+#define DISCONNECT_TIMEOUT 120
+
 // Session structure
 struct Session {
     int socket;
@@ -41,6 +44,7 @@ struct Player {
     char username[50];
     int role;
     int is_alive;
+    time_t disconnect_time;  // Thời điểm disconnect (0 nếu đang online)
 };
 
 // Cấu trúc phòng

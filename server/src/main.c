@@ -233,6 +233,7 @@ int main() {
             check_guard_phase_timeout(); // Check guard deadline
             check_wolf_phase_timeout();  // Check wolf deadline and process votes
             check_day_phase_timeout();   // Check day deadline and process votes
+            check_disconnect_timeouts(); // Check disconnected players (2 min timeout)
             last_check = now;
         }
 
