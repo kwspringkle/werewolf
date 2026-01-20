@@ -57,8 +57,14 @@ void load_env(){
 void connect_db(){
     conn = mysql_init(NULL);
     if (conn == NULL){
-        fprintf(stderr, "mysql_init() failed\n");
-        exit(1);
+        if (mysql_real_connect(conn, ENV_HOST, ENV_USER, ENV_PASS, ENV_NAME, ENV_PORT, NULL, 0) == NULL) {
+            fprintf(stderr, "mysql_real_connect() failed (errno=%u): %s\n",
+                    mysql_errno(conn), mysql_error(conn));
+            fprintf(stderr, "DB_HOST=%s DB_USER=%s DB_NAME=%s DB_PORT=%d\n",
+                    ENV_HOST, ENV_USER, ENV_NAME, ENV_PORT);
+            mysql_close(conn);
+            exit(1);
+        }
     }
 
     if (mysql_real_connect(conn, ENV_HOST, ENV_USER, ENV_PASS,

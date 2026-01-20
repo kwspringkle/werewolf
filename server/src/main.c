@@ -144,7 +144,10 @@ int main() {
     time_t last_cleanup = time(NULL);
 
     while (1) {
-        struct timeval tv = {5, 0};
+        // Timeout tối đa cho select: 1 giây
+        // Đảm bảo vòng lặp main luôn "thức dậy" ít nhất mỗi 1 giây
+        // để chạy các hàm check_timeouts(), check_disconnect_timeouts(), cleanup_empty_rooms(), ...
+        struct timeval tv = {1, 0};
 
         FD_ZERO(&readfds);
         FD_SET(server_fd, &readfds);
@@ -158,7 +161,7 @@ int main() {
             }
         }
 
-        int sel = select(max_sd + 1, &readfds, NULL, NULL, NULL);
+        int sel = select(max_sd + 1, &readfds, NULL, NULL, &tv);
         if (sel < 0) {
             perror("select failed");
             break;

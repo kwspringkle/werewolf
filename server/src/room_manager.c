@@ -411,13 +411,13 @@ void start_night_phase(int room_index, int duration_seconds) {
     cJSON_AddNumberToObject(notif, "guard_duration", GUARD_PHASE_DURATION);
     cJSON_AddNumberToObject(notif, "wolf_duration", WOLF_PHASE_DURATION);
     
-    // Thêm players list với đầy đủ thông tin (username, is_alive, role)
+    // Thêm players list với thông tin công khai (KHÔNG bao gồm role để tránh lộ role)
     cJSON *players_array = cJSON_CreateArray();
     for (int i = 0; i < rooms[room_index].current_players; i++) {
         cJSON *player_obj = cJSON_CreateObject();
         cJSON_AddStringToObject(player_obj, "username", rooms[room_index].players[i].username);
         cJSON_AddNumberToObject(player_obj, "is_alive", rooms[room_index].players[i].is_alive);
-        cJSON_AddNumberToObject(player_obj, "role", rooms[room_index].players[i].role);
+        // KHÔNG gửi role để tránh lộ role cho các players khác
         cJSON_AddItemToArray(players_array, player_obj);
     }
     cJSON_AddItemToObject(notif, "players", players_array);
