@@ -1,6 +1,6 @@
 from PyQt5 import QtWidgets, QtCore
 from components.user_header import UserHeader
-
+import time
 class WolfSelectWindow(QtWidgets.QWidget):
     """Wolf selection window: choose a living target to bite (UI-only selection until submit)."""
 
@@ -39,6 +39,7 @@ class WolfSelectWindow(QtWidgets.QWidget):
         parent=None,
         window_manager=None,
         toast_manager=None,
+        deadline=None,
     ):
         super().__init__(parent)
         self.use_default_size = True
@@ -47,7 +48,13 @@ class WolfSelectWindow(QtWidgets.QWidget):
         self.alive_status = alive_status
         self.my_username = my_username
         self.duration = duration_seconds
-        self.remaining = duration_seconds
+        # Sử dụng deadline từ server (epoch seconds) để đồng bộ thời gian chính xác
+        self.deadline = deadline
+        if self.deadline is None:
+            # Fallback: tính từ duration
+            self.deadline = time.time() + duration_seconds
+        # Tính remaining từ deadline
+        self.remaining = max(0, int(self.deadline - time.time()))
         self.network_client = network_client
         self.room_id = room_id
         self.window_manager = window_manager
@@ -312,7 +319,8 @@ class WolfSelectWindow(QtWidgets.QWidget):
         self.timer.start(1000)
 
     def _tick(self):
-        self.remaining -= 1
+        # Tính remaining từ deadline để đồng bộ với server
+        self.remaining = max(0, int(self.deadline - time.time()))
         if self.remaining >= 0:
             self.timer_label.setText(f"⏱️ {self.remaining}s")
         if self.remaining <= 0:

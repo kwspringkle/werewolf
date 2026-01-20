@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <time.h>
+#include <errno.h>
 
 #include "packet_handler.h"
 #include "database.h"
@@ -35,7 +36,45 @@ void send_packet(int client_fd, uint16_t header, const char *payload) {
     memcpy(buffer + 2, &l, 4);
     memcpy(buffer + 6, payload, len);
 
-    send(client_fd, buffer, 6 + len, 0);
+    // Xử lý partial send với socket non-blocking
+    size_t total_sent = 0;
+    size_t total_len = 6 + len;
+    int retry_count = 0;
+    const int MAX_RETRIES = 10;
+
+    while (total_sent < total_len) {
+        ssize_t sent = send(client_fd, buffer + total_sent, total_len - total_sent, 0);
+        
+        if (sent > 0) {
+            total_sent += (size_t)sent;
+            retry_count = 0;
+        } else if (sent == 0) {
+            fprintf(stderr, "[send_packet] Socket %d closed by peer\n", client_fd);
+            break;
+        } else {
+            if (errno == EINTR) {
+                continue; // Retry ngay nếu bị signal interrupt
+            } else if (errno == EWOULDBLOCK || errno == EAGAIN) {
+                // Socket buffer đầy, retry với delay nhỏ
+                if (retry_count < MAX_RETRIES) {
+                    usleep(1000); // 1ms delay
+                    retry_count++;
+                    continue;
+                } else {
+                    fprintf(stderr, "[send_packet] Socket %d buffer full after %d retries\n", client_fd, MAX_RETRIES);
+                    break;
+                }
+            } else {
+                perror("[send_packet] send() failed");
+                break;
+            }
+        }
+    }
+
+    if (total_sent < total_len) {
+        fprintf(stderr, "[send_packet] Failed to send complete packet to client %d: sent %zu/%zu bytes\n", 
+                client_fd, total_sent, total_len);
+    }
 
     free(buffer);
 }
@@ -852,8 +891,20 @@ static void handle_day_vote(int client_fd, cJSON *json) {
     cJSON *room_id_obj = cJSON_GetObjectItemCaseSensitive(json, "room_id");
     cJSON *target_obj = cJSON_GetObjectItemCaseSensitive(json, "target_username");
 
+    // Helper macro: send error and return
+#define VOTE_ERROR(MSG) do { \
+    cJSON *error = cJSON_CreateObject(); \
+    cJSON_AddStringToObject(error, "type", "vote_error"); \
+    cJSON_AddStringToObject(error, "message", (MSG)); \
+    char *error_str = cJSON_PrintUnformatted(error); \
+    send_packet(client_fd, ERROR_MSG, error_str); \
+    free(error_str); \
+    cJSON_Delete(error); \
+    return; \
+} while(0)
+
     if (!room_id_obj || !cJSON_IsNumber(room_id_obj) || !target_obj || !cJSON_IsString(target_obj)) {
-        return;
+        VOTE_ERROR("Invalid or missing room_id/target_username");
     }
 
     int room_id = room_id_obj->valueint;
@@ -864,18 +915,25 @@ static void handle_day_vote(int client_fd, cJSON *json) {
             break;
         }
     }
-    if (room_index == -1) return;
+    if (room_index == -1) {
+        VOTE_ERROR("Room not found");
+    }
 
     if (rooms[room_index].status != ROOM_PLAYING || !rooms[room_index].day_phase_active) {
-        return;
+        VOTE_ERROR("Day phase is not active");
     }
 
     int voter_index = _find_player_index_by_socket(room_index, client_fd);
-    if (voter_index == -1) return;
-    if (!rooms[room_index].players[voter_index].is_alive) return; // dead can't vote
+    if (voter_index == -1) {
+        VOTE_ERROR("You are not in this room");
+    }
+    if (!rooms[room_index].players[voter_index].is_alive) {
+        VOTE_ERROR("Dead players cannot vote");
+    }
 
     const char *target_username = target_obj->valuestring;
     if (!target_username || target_username[0] == '\0') {
+        // Skip vote - valid, no error
         rooms[room_index].day_votes[voter_index][0] = '\0';
         rooms[room_index].day_vote_responded[voter_index] = 1;
         maybe_finalize_day_votes_early(room_index);
@@ -883,15 +941,23 @@ static void handle_day_vote(int client_fd, cJSON *json) {
     }
 
     int target_index = _find_player_index_by_username(room_index, target_username);
-    if (target_index == -1) return;
-    if (!rooms[room_index].players[target_index].is_alive) return;
-    if (!_is_round2_candidate(room_index, target_index)) return;
+    if (target_index == -1) {
+        VOTE_ERROR("Target player not found");
+    }
+    if (!rooms[room_index].players[target_index].is_alive) {
+        VOTE_ERROR("Target is already dead");
+    }
+    if (!_is_round2_candidate(room_index, target_index)) {
+        VOTE_ERROR("Target is not a valid candidate in round 2");
+    }
 
     strncpy(rooms[room_index].day_votes[voter_index], target_username, 49);
     rooms[room_index].day_votes[voter_index][49] = '\0';
 
     rooms[room_index].day_vote_responded[voter_index] = 1;
     maybe_finalize_day_votes_early(room_index);
+    
+#undef VOTE_ERROR
 }
 
 // Bắt đầu game

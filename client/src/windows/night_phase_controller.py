@@ -12,7 +12,7 @@ from .roles.wolf.wolf_wait_window import WolfWaitWindow
 
 class NightPhaseController:
     """Điều phối night phase: seer -> guard -> wolf (role-based windows)"""
-    def __init__(self, window_manager, network_client, players, my_username, room_id, is_seer, is_guard, is_wolf, wolf_usernames, seer_duration=30, guard_duration=30, wolf_duration=30, toast_manager=None):
+    def __init__(self, window_manager, network_client, players, my_username, room_id, is_seer, is_guard, is_wolf, wolf_usernames, seer_duration=30, guard_duration=30, wolf_duration=30, toast_manager=None, seer_deadline=None, guard_deadline=None, wolf_deadline=None):
         self.window_manager = window_manager
         self.network_client = network_client
         self.players = players
@@ -25,6 +25,10 @@ class NightPhaseController:
         self.seer_duration = seer_duration
         self.guard_duration = guard_duration
         self.wolf_duration = wolf_duration
+        # Deadline từ server (epoch seconds) để đồng bộ thời gian chính xác
+        self.seer_deadline = seer_deadline
+        self.guard_deadline = guard_deadline
+        self.wolf_deadline = wolf_deadline
         self.toast_manager = toast_manager
         self.seer_window = None
         self.seer_result_window = None
@@ -35,6 +39,7 @@ class NightPhaseController:
         self.wolf_phase_started = False   # Flag để tránh chuyển phase nhiều lần
         print(f"[DEBUG] NightPhaseController initialized - seer: {self.is_seer}, guard: {self.is_guard}, wolf: {self.is_wolf}")
         print(f"[DEBUG] Phase durations - seer: {self.seer_duration}s, guard: {self.guard_duration}s, wolf: {self.wolf_duration}s")
+        print(f"[DEBUG] Phase deadlines - seer: {self.seer_deadline}, guard: {self.guard_deadline}, wolf: {self.wolf_deadline}")
 
     def start(self):
         print("[DEBUG] Starting seer phase...")
@@ -56,7 +61,8 @@ class NightPhaseController:
                     self.network_client,
                     self.room_id,
                     window_manager=self.window_manager,
-                    toast_manager=self.toast_manager
+                    toast_manager=self.toast_manager,
+                    deadline=self.seer_deadline
                 )
                 # Register + navigate (single-window flow)
                 self.window_manager.register_window("seer_select", self.seer_window)
@@ -166,7 +172,8 @@ class NightPhaseController:
                 self.network_client, 
                 self.room_id,
                 window_manager=self.window_manager,
-                toast_manager=self.toast_manager
+                toast_manager=self.toast_manager,
+                deadline=self.guard_deadline
             )
             self.window_manager.register_window("guard_select", self.guard_window)
             self.window_manager.navigate_to("guard_select")
@@ -241,6 +248,7 @@ class NightPhaseController:
                 network_client=self.network_client,
                 room_id=self.room_id,
                 can_vote=my_is_alive,
+                deadline=self.wolf_deadline,
             )
             self.window_manager.register_window("wolf_select", self.wolf_controller)
 
@@ -262,9 +270,10 @@ class NightPhaseController:
                     self.my_username,
                     self.wolf_usernames,
                     send_callback=_send_wolf_chat,
-                    duration_seconds=getattr(self.wolf_controller, "remaining", self.wolf_duration),
+                    duration_seconds=self.wolf_duration,
                     network_client=self.network_client,
                     room_id=self.room_id,
+                    deadline=self.wolf_deadline,
                 )
                 self.window_manager.register_window("wolf_chat", self.wolf_chat_window)
 

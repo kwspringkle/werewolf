@@ -463,22 +463,32 @@ class DayVoteWindow(QtWidgets.QWidget):
             print(f"[DEBUG] Sending vote for: {self.selected_username}")
             self.network_client.send_day_vote(self.current_room_id, self.selected_username)
             
-            self.has_voted = True
+            # Don't set has_voted immediately - wait for server response
+            # If server returns error, we'll reset state in room_window error handler
+            # If successful, we'll keep the state (has_voted will be set when VOTE_RESULT is received)
+            # For now, temporarily disable to prevent double-click
             self.submit_btn.setEnabled(False)
             self.skip_btn.setEnabled(False)
             
-            # Disable all cards
+            # Disable all cards temporarily
             for card, _, _ in self.user_cards:
                 card.setEnabled(False)
                 card.setCursor(QtCore.Qt.ForbiddenCursor)
             
-            if self.toast_manager:
-                self.toast_manager.success(f"Voted for {self.selected_username}!")
+            # Note: Success message will be shown when VOTE_RESULT is received
+            # If error occurs, state will be reset by room_window error handler
             
         except Exception as e:
             print(f"[ERROR] Failed to send vote: {e}")
             if self.toast_manager:
                 self.toast_manager.error(f"Failed to send vote: {e}")
+            # Re-enable on exception
+            self.submit_btn.setEnabled(self.selected_username is not None)
+            if self.my_is_alive:
+                self.skip_btn.setEnabled(True)
+            for card, _, _ in self.user_cards:
+                card.setEnabled(True)
+                card.setCursor(QtCore.Qt.PointingHandCursor)
 
     def on_skip_vote(self):
         """Skip voting"""

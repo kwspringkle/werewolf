@@ -110,7 +110,8 @@ client/
         ├── login_window.py      # Màn hình đăng nhập
         ├── lobby_window.py      # Màn hình danh sách phòng
         ├── role_card_window.py  # Hiển thị vai trò người chơi
-        └── room_window.py       # Màn hình bên trong phòng
+        ├── room_window.py       # Màn hình bên trong phòng
+        └──....
 
 ```
 
@@ -190,7 +191,6 @@ class MyWindow(QtWidgets.QWidget):
 ```
 
 ---
-
 ## 🐛 Troubleshooting
 
 ### Lỗi: `ModuleNotFoundError: No module named 'PyQt5'`

@@ -140,13 +140,21 @@ void guard_handle_protect(int room_index, int requester_index, const char *targe
         rooms[room_index].guard_choice_made = 1;
         rooms[room_index].guard_protected_username[0] = '\0';
 
+        // Update wolf_deadline when guard acts early
+        time_t now = time(NULL);
+        rooms[room_index].wolf_deadline = now + WOLF_PHASE_DURATION;
+
         cJSON_AddStringToObject(response, "status", "success");
         cJSON_AddBoolToObject(response, "skipped", 1);
 
         printf("[SERVER] Guard skipped, broadcasting PHASE_WOLF_START to all players in room %d\n", rooms[room_index].id);
+        printf("[SERVER] Updated wolf_deadline to %ld (now + %d seconds)\n", 
+               rooms[room_index].wolf_deadline, WOLF_PHASE_DURATION);
         cJSON *wolf_notif = cJSON_CreateObject();
         cJSON_AddStringToObject(wolf_notif, "type", "phase_wolf_start");
         cJSON_AddNumberToObject(wolf_notif, "wolf_duration", WOLF_PHASE_DURATION);
+        // Gửi deadline (epoch seconds) để client đồng bộ thời gian chính xác
+        cJSON_AddNumberToObject(wolf_notif, "wolf_deadline", (double)rooms[room_index].wolf_deadline);
         char *wolf_notif_str = cJSON_PrintUnformatted(wolf_notif);
         broadcast_room(room_index, PHASE_WOLF_START, wolf_notif_str);
         free(wolf_notif_str);
@@ -187,14 +195,22 @@ void guard_handle_protect(int room_index, int requester_index, const char *targe
     strncpy(rooms[room_index].guard_protected_username, target_username, sizeof(rooms[room_index].guard_protected_username) - 1);
     rooms[room_index].guard_protected_username[sizeof(rooms[room_index].guard_protected_username) - 1] = '\0';
 
+    // Update wolf_deadline when guard acts early
+    time_t now = time(NULL);
+    rooms[room_index].wolf_deadline = now + WOLF_PHASE_DURATION;
+
     cJSON_AddStringToObject(response, "status", "success");
     cJSON_AddStringToObject(response, "target_username", target_username);
     
     // Báo tất cả client chuyển sang wolf phase
     printf("[SERVER] Guard has made choice, broadcasting PHASE_WOLF_START to all players in room %d\n", rooms[room_index].id);
+    printf("[SERVER] Updated wolf_deadline to %ld (now + %d seconds)\n", 
+           rooms[room_index].wolf_deadline, WOLF_PHASE_DURATION);
     cJSON *wolf_notif = cJSON_CreateObject();
     cJSON_AddStringToObject(wolf_notif, "type", "phase_wolf_start");
     cJSON_AddNumberToObject(wolf_notif, "wolf_duration", WOLF_PHASE_DURATION);
+    // Gửi deadline (epoch seconds) để client đồng bộ thời gian chính xác
+    cJSON_AddNumberToObject(wolf_notif, "wolf_deadline", (double)rooms[room_index].wolf_deadline);
     char *wolf_notif_str = cJSON_PrintUnformatted(wolf_notif);
     broadcast_room(room_index, PHASE_WOLF_START, wolf_notif_str);
     free(wolf_notif_str);

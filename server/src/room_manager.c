@@ -410,6 +410,10 @@ void start_night_phase(int room_index, int duration_seconds) {
     cJSON_AddNumberToObject(notif, "seer_duration", SEER_PHASE_DURATION);
     cJSON_AddNumberToObject(notif, "guard_duration", GUARD_PHASE_DURATION);
     cJSON_AddNumberToObject(notif, "wolf_duration", WOLF_PHASE_DURATION);
+    // Gửi deadline (epoch seconds) để client đồng bộ thời gian chính xác
+    cJSON_AddNumberToObject(notif, "seer_deadline", (double)rooms[room_index].seer_deadline);
+    cJSON_AddNumberToObject(notif, "guard_deadline", (double)rooms[room_index].guard_deadline);
+    cJSON_AddNumberToObject(notif, "wolf_deadline", (double)rooms[room_index].wolf_deadline);
     
     // Thêm players list với thông tin công khai (KHÔNG bao gồm role để tránh lộ role)
     cJSON *players_array = cJSON_CreateArray();
@@ -531,10 +535,20 @@ void check_seer_phase_timeout() {
             printf("[SERVER] Seer phase timeout for room %d, broadcasting PHASE_GUARD_START\n", rooms[i].id);
             rooms[i].seer_choice_made = 1; // Mark as done to prevent multiple broadcasts
             
+            // Update guard_deadline and wolf_deadline when seer phase ends (timeout)
+            // This ensures consistency whether seer acts early or times out
+            rooms[i].guard_deadline = now + GUARD_PHASE_DURATION;
+            rooms[i].wolf_deadline = rooms[i].guard_deadline + WOLF_PHASE_DURATION;
+            printf("[SERVER] Updated guard_deadline to %ld (now + %d seconds), wolf_deadline to %ld\n", 
+                   rooms[i].guard_deadline, GUARD_PHASE_DURATION, rooms[i].wolf_deadline);
+            
             // Broadcast guard phase start to all players
             cJSON *guard_notif = cJSON_CreateObject();
             cJSON_AddStringToObject(guard_notif, "type", "phase_guard_start");
             cJSON_AddNumberToObject(guard_notif, "guard_duration", GUARD_PHASE_DURATION);
+            // Gửi deadline (epoch seconds) để client đồng bộ thời gian chính xác
+            cJSON_AddNumberToObject(guard_notif, "guard_deadline", (double)rooms[i].guard_deadline);
+            cJSON_AddNumberToObject(guard_notif, "wolf_deadline", (double)rooms[i].wolf_deadline);
             char *guard_notif_str = cJSON_PrintUnformatted(guard_notif);
             broadcast_room(i, PHASE_GUARD_START, guard_notif_str);
             free(guard_notif_str);
@@ -559,10 +573,18 @@ void check_guard_phase_timeout() {
             printf("[SERVER] Guard phase timeout for room %d, broadcasting PHASE_WOLF_START\n", rooms[i].id);
             rooms[i].guard_choice_made = 1; // Mark as done to prevent multiple broadcasts
             
+            // Update wolf_deadline when guard phase ends (timeout)
+            // This ensures consistency whether guard acts early or times out
+            rooms[i].wolf_deadline = now + WOLF_PHASE_DURATION;
+            printf("[SERVER] Updated wolf_deadline to %ld (now + %d seconds)\n", 
+                   rooms[i].wolf_deadline, WOLF_PHASE_DURATION);
+            
             // Broadcast wolf phase start to all players
             cJSON *wolf_notif = cJSON_CreateObject();
             cJSON_AddStringToObject(wolf_notif, "type", "phase_wolf_start");
             cJSON_AddNumberToObject(wolf_notif, "wolf_duration", WOLF_PHASE_DURATION);
+            // Gửi deadline (epoch seconds) để client đồng bộ thời gian chính xác
+            cJSON_AddNumberToObject(wolf_notif, "wolf_deadline", (double)rooms[i].wolf_deadline);
             char *wolf_notif_str = cJSON_PrintUnformatted(wolf_notif);
             broadcast_room(i, PHASE_WOLF_START, wolf_notif_str);
             free(wolf_notif_str);

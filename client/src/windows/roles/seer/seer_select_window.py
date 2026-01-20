@@ -1,9 +1,9 @@
 from PyQt5 import QtWidgets, QtCore
 from components.user_header import UserHeader
-
+import time
 class SeerSelectWindow(QtWidgets.QWidget):
     """màn chọn cho role tiên tri"""
-    def __init__(self, players, my_username, duration_seconds=30, network_client=None, room_id=None, parent=None, window_manager=None, toast_manager=None):
+    def __init__(self, players, my_username, duration_seconds=30, network_client=None, room_id=None, parent=None, window_manager=None, toast_manager=None, deadline=None):
         super().__init__(parent)
         # Normal window (movable, consistent sizing via WindowManager)
         self.use_default_size = True
@@ -11,7 +11,13 @@ class SeerSelectWindow(QtWidgets.QWidget):
         self.players = players
         self.my_username = my_username
         self.duration = duration_seconds
-        self.remaining = duration_seconds
+        # Sử dụng deadline từ server (epoch seconds) để đồng bộ thời gian chính xác
+        self.deadline = deadline
+        if self.deadline is None:
+            # Fallback: tính từ duration
+            self.deadline = time.time() + duration_seconds
+        # Tính remaining từ deadline
+        self.remaining = max(0, int(self.deadline - time.time()))
         self.network_client = network_client
         self.room_id = room_id
         self.window_manager = window_manager
@@ -270,7 +276,8 @@ class SeerSelectWindow(QtWidgets.QWidget):
         self.timer.start(1000)
 
     def _tick(self):
-        self.remaining -= 1
+        # Tính remaining từ deadline để đồng bộ với server
+        self.remaining = max(0, int(self.deadline - time.time()))
         if self.remaining >= 0:
             self.timer_label.setText(f"⏱️ {self.remaining}s")
         if self.remaining <= 0:

@@ -313,6 +313,7 @@ cd server
 ```
 
 ### Packet Types
+Chi tiết xem file [PACKET_PAYLOADS.md](PACKET_PAYLOADS.md)
 
 | Code | Name | Description |
 |------|------|-------------|
@@ -335,6 +336,7 @@ cd server
 | **3xx** | **Game Control** | |
 | 301 | START_GAME_REQ | Bắt đầu game |
 | 302 |GAME_START_RES_AND_ROLE | Phân vai |
+...
 
 ---
 
@@ -348,11 +350,9 @@ cd server
 - [x] Update người chơi trong phòng real-time
 - [x] Toast notifications
 - [x] Phân vai cho người chơi
-
-### 🚧 Đang Phát Triển
-- [⏳] Gameplay chính cho từng role
-- [⏳] Chat 
-- [⏳] Vote system
+- [x] Gameplay chính cho từng role
+- [x] Chat 
+- [x] Vote system
 
 ---
 
